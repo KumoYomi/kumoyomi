@@ -64,22 +64,42 @@ export async function syncSourceDnrRules(sources: Array<{ baseUrl: string }>): P
   let idx = 0;
 
   for (const [host, origin] of uniqueOrigins.entries()) {
-    addRules.push({
-      id: SOURCE_RULE_ID_START + idx,
-      priority: 1,
-      action: {
-        type: 'modifyHeaders',
-        requestHeaders: [
-          { header: 'Referer', operation: 'set', value: `${origin}/` },
-          { header: 'Origin', operation: 'set', value: origin },
-        ],
+    addRules.push(
+      {
+        id: SOURCE_RULE_ID_START + idx * 2,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          requestHeaders: [
+            { header: 'Referer', operation: 'set', value: `${origin}/` },
+            { header: 'Origin', operation: 'remove' },
+          ],
+        },
+        condition: {
+          urlFilter: `||${host}/`,
+          ...(initiator ? { initiatorDomains: [initiator] } : {}),
+          requestMethods: ['get', 'head'],
+          resourceTypes: ['xmlhttprequest', 'image', 'other'],
+        },
       },
-      condition: {
-        urlFilter: `||${host}/`,
-        ...(initiator ? { initiatorDomains: [initiator] } : {}),
-        resourceTypes: ['xmlhttprequest', 'image', 'other'],
+      {
+        id: SOURCE_RULE_ID_START + idx * 2 + 1,
+        priority: 1,
+        action: {
+          type: 'modifyHeaders',
+          requestHeaders: [
+            { header: 'Referer', operation: 'set', value: `${origin}/` },
+            { header: 'Origin', operation: 'set', value: origin },
+          ],
+        },
+        condition: {
+          urlFilter: `||${host}/`,
+          ...(initiator ? { initiatorDomains: [initiator] } : {}),
+          excludedRequestMethods: ['get', 'head'],
+          resourceTypes: ['xmlhttprequest', 'image', 'other'],
+        },
       },
-    });
+    );
     idx += 1;
   }
 

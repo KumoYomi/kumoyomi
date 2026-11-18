@@ -31,8 +31,8 @@ export function CloudflareBanner({
             </p>
             <p className="text-xs leading-relaxed text-amber-200/80">
               Le site bloque temporairement les requêtes automatiques (HTTP 403). Ouvrez le site
-              dans un onglet pour valider votre session navigateur, puis revenez cliquer sur
-              Réessayer.
+              dans un onglet pour valider le contrôle Cloudflare, gardez cet onglet ouvert, puis
+              revenez cliquer sur Réessayer.
             </p>
           </div>
         </div>

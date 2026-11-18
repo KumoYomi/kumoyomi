@@ -1,5 +1,9 @@
 import { db } from '@/src/core/db/db';
-import { sendBackgroundMessage } from '@/src/core/extension/browserBridge';
+import {
+  requestTabProxyFetch,
+  sendBackgroundMessage,
+} from '@/src/core/extension/browserBridge';
+import { isCloudflareResponse } from '@/src/core/parser/httpClient';
 
 const scopeUrls = new Map<string, Map<string, string>>();
 const inflightRequests = new Map<string, Promise<string>>();
@@ -85,11 +89,37 @@ export async function fetchImageAsBlobUrl(
         credentials: 'include',
       });
 
+      let blob: Blob | undefined;
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} sur l'image`);
+        let cfDetected = response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge';
+        if (!cfDetected && (response.status === 403 || response.status === 503 || response.status === 429)) {
+          const errText = await response.text().catch(() => '');
+          cfDetected = isCloudflareResponse(response.status, response.headers, errText);
+        }
+        if (cfDetected) {
+          const proxied = await requestTabProxyFetch({
+            url: trimmed,
+            method: 'GET',
+            responseMode: 'base64',
+          });
+          if (proxied?.foundTab && proxied.ok && proxied.bodyBase64) {
+            const binary = atob(proxied.bodyBase64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+            blob = new Blob([bytes], {
+              type: proxied.headers?.['content-type'] || 'image/jpeg',
+            });
+          }
+        }
+        if (!blob) {
+          throw new Error(`HTTP ${response.status} sur l'image`);
+        }
+      } else {
+        blob = await response.blob();
       }
 
-      const blob = await response.blob();
       if (!blob || blob.size === 0) {
         throw new Error('Image vide reçue');
       }

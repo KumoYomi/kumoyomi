@@ -1,10 +1,14 @@
 import { browser } from 'wxt/browser';
 import { db, getOrCreateSettings } from '@/src/core/db/db';
-import type { BackgroundMessage } from '@/src/core/extension/browserBridge';
+import {
+  type BackgroundMessage,
+  registerInProcessTabProxyHandler,
+} from '@/src/core/extension/browserBridge';
 import {
   ensureImageRefererDnrRule,
   syncSourceDnrRules,
 } from '@/src/core/extension/dnrRules';
+import { proxyFetchInOpenTab } from '@/src/core/extension/tabProxy';
 import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
 
 const UPDATE_ALARM_NAME = 'kumoyomi-check-updates';
@@ -53,6 +57,8 @@ async function syncStoredSourcesDnr(): Promise<void> {
 }
 
 export default defineBackground(() => {
+  registerInProcessTabProxyHandler(proxyFetchInOpenTab);
+
   browser.runtime.onInstalled.addListener((details) => {
     void (async () => {
       await syncStoredSourcesDnr();
@@ -101,6 +107,11 @@ export default defineBackground(() => {
         case 'ENSURE_IMAGE_REFERER': {
           await ensureImageRefererDnrRule(message.imageUrl, message.refererOrigin);
           sendResponse({ ok: true });
+          break;
+        }
+        case 'PROXY_FETCH_IN_TAB': {
+          const proxyResult = await proxyFetchInOpenTab(message.payload);
+          sendResponse(proxyResult);
           break;
         }
         case 'CHECK_UPDATES_NOW': {

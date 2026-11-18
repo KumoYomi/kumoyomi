@@ -1,3 +1,4 @@
+import { requestTabProxyFetch } from '@/src/core/extension/browserBridge';
 import type { RequestConfig, SourceConfig } from '@/src/core/types/source';
 
 export class CloudflareChallengeError extends Error {
@@ -114,6 +115,13 @@ function interpolateUnknown(value: unknown, variables: TemplateVariables): unkno
   return value;
 }
 
+const TAB_PROXY_TTL_MS = 5 * 60 * 1000;
+const preferredTabProxyOrigins = new Map<string, number>();
+
+export function clearTabProxyCache(): void {
+  preferredTabProxyOrigins.clear();
+}
+
 export function isCloudflareResponse(status: number, headers: Headers, bodyText: string): boolean {
   if (headers.get('cf-mitigated')?.toLowerCase() === 'challenge') {
     return true;
@@ -122,7 +130,9 @@ export function isCloudflareResponse(status: number, headers: Headers, bodyText:
     const lower = bodyText.toLowerCase();
     if (
       lower.includes('<title>just a moment...</title>') ||
+      lower.includes('<title>un instant...</title>') ||
       lower.includes('challenges.cloudflare.com') ||
+      lower.includes('/cdn-cgi/challenge-platform/') ||
       lower.includes('cf-browser-verification') ||
       lower.includes('enable javascript and cookies to continue') ||
       lower.includes('_cf_chl_opt')
@@ -140,12 +150,96 @@ export interface FetchedResponse {
   status: number;
 }
 
+interface TransportResponse {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  url: string;
+  headers: Headers;
+}
+
+function serializeHeadersInit(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {};
+  const result: Record<string, string> = {};
+  new Headers(headers).forEach((value, key) => {
+    result[key] = value;
+  });
+  return result;
+}
+
+async function tryFetchViaOpenTab(
+  url: string,
+  init: RequestInit,
+  source: SourceConfig,
+  timeoutMs: number,
+): Promise<{ response: TransportResponse; text: string } | null> {
+  const res = await requestTabProxyFetch({
+    url,
+    method: init.method ?? 'GET',
+    headers: serializeHeadersInit(init.headers),
+    body: typeof init.body === 'string' ? init.body : undefined,
+    responseMode: 'text',
+    timeoutMs,
+  });
+
+  if (!res?.foundTab) {
+    return null;
+  }
+
+  if (res.error) {
+    throw new SourceHttpError({
+      sourceId: source.id,
+      url,
+      status: 0,
+      statusText: 'Tab Proxy Error',
+      message: `Impossible de joindre ${source.name} depuis l'onglet ouvert (${res.error}).`,
+    });
+  }
+
+  const headers = new Headers(res.headers ?? {});
+  const status = res.status ?? 0;
+  return {
+    response: {
+      ok: Boolean(res.ok),
+      status,
+      statusText: res.statusText ?? '',
+      url: res.finalUrl || url,
+      headers,
+    },
+    text: res.bodyText ?? '',
+  };
+}
+
+function throwCloudflareError(source: SourceConfig, status: number): never {
+  throw new CloudflareChallengeError({
+    sourceId: source.id,
+    sourceName: source.name,
+    url: source.baseUrl,
+    status,
+  });
+}
+
 async function executeTimedFetch(
   url: string,
   init: RequestInit,
   source: SourceConfig,
   timeoutMs: number,
-): Promise<{ response: Response; text: string }> {
+): Promise<{ response: TransportResponse; text: string }> {
+  const origin = new URL(url).origin;
+  const cachedUntil = preferredTabProxyOrigins.get(origin);
+  if (cachedUntil && cachedUntil > Date.now()) {
+    const proxied = await tryFetchViaOpenTab(url, init, source, timeoutMs);
+    if (proxied) {
+      if (isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
+        preferredTabProxyOrigins.delete(origin);
+        throwCloudflareError(source, proxied.response.status);
+      }
+      preferredTabProxyOrigins.set(origin, Date.now() + TAB_PROXY_TTL_MS);
+      return proxied;
+    }
+    preferredTabProxyOrigins.delete(origin);
+  }
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -179,15 +273,25 @@ async function executeTimedFetch(
 
   const text = await response.text();
   if (isCloudflareResponse(response.status, response.headers, text)) {
-    throw new CloudflareChallengeError({
-      sourceId: source.id,
-      sourceName: source.name,
-      url: source.baseUrl,
-      status: response.status,
-    });
+    // Repli automatique sur un onglet déjà ouvert et débloqué du même site (cookies partitionnés / Sec-Fetch-Site)
+    const proxied = await tryFetchViaOpenTab(url, init, source, timeoutMs);
+    if (proxied && !isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
+      preferredTabProxyOrigins.set(origin, Date.now() + TAB_PROXY_TTL_MS);
+      return proxied;
+    }
+    throwCloudflareError(source, proxied?.response.status ?? response.status);
   }
 
-  return { response, text };
+  return {
+    response: {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url || url,
+      headers: response.headers,
+    },
+    text,
+  };
 }
 
 export async function fetchSourceResponse(

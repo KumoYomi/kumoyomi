@@ -1,6 +1,28 @@
+export interface TabProxyFetchRequest {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  responseMode?: 'text' | 'base64';
+  timeoutMs?: number;
+}
+
+export interface TabProxyFetchResult {
+  foundTab: boolean;
+  ok?: boolean;
+  status?: number;
+  statusText?: string;
+  finalUrl?: string;
+  headers?: Record<string, string>;
+  bodyText?: string;
+  bodyBase64?: string;
+  error?: string;
+}
+
 export type BackgroundMessage =
   | { type: 'SYNC_SOURCE_RULES'; sources: Array<{ baseUrl: string }> }
   | { type: 'ENSURE_IMAGE_REFERER'; imageUrl: string; refererOrigin: string }
+  | { type: 'PROXY_FETCH_IN_TAB'; payload: TabProxyFetchRequest }
   | { type: 'CHECK_UPDATES_NOW' }
   | { type: 'SET_BADGE_COUNT'; count: number }
   | { type: 'SET_UPDATE_ALARM'; intervalMinutes: number };
@@ -81,4 +103,32 @@ export async function openExternalTab(url: string): Promise<void> {
     return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+type InProcessTabProxyHandler = (
+  request: TabProxyFetchRequest,
+) => Promise<TabProxyFetchResult>;
+
+let inProcessTabProxyHandler: InProcessTabProxyHandler | null = null;
+
+/** Permet au worker d'arrière-plan d'exécuter le proxy onglet sans passer par runtime.sendMessage. */
+export function registerInProcessTabProxyHandler(
+  handler: InProcessTabProxyHandler | null,
+): void {
+  inProcessTabProxyHandler = handler;
+}
+
+export async function requestTabProxyFetch(
+  request: TabProxyFetchRequest,
+): Promise<TabProxyFetchResult | undefined> {
+  if (inProcessTabProxyHandler) {
+    return inProcessTabProxyHandler(request);
+  }
+  if (isExtensionContext()) {
+    return sendBackgroundMessage<TabProxyFetchResult>({
+      type: 'PROXY_FETCH_IN_TAB',
+      payload: request,
+    });
+  }
+  return undefined;
 }

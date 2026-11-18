@@ -7,7 +7,11 @@ import { normalizeMangaKey } from '@/src/core/db/db';
 import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
 import { UniversalParserEngine } from '@/src/core/parser/engine';
-import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
+import { registerInProcessTabProxyHandler } from '@/src/core/extension/browserBridge';
+import {
+  clearTabProxyCache,
+  CloudflareChallengeError,
+} from '@/src/core/parser/httpClient';
 import {
   resolveSourceWithTemplates,
   validateRawSourceConfig,
@@ -35,6 +39,8 @@ describe('KumoYomi Universal Parser & Templates', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    registerInProcessTabProxyHandler(null);
+    clearTabProxyCache();
   });
 
   it('résout correctement l’héritage extends="origines"', () => {
@@ -507,6 +513,61 @@ describe('KumoYomi Universal Parser & Templates', () => {
       CloudflareChallengeError,
     );
     expect(cfWarmupCalled).toBe(false);
+  });
+
+  it('bascule sur un onglet ouvert débloqué si le fetch direct subit Cloudflare', async () => {
+    const resolved = resolveSourceWithTemplates(demoOriginesRaw, templateMap);
+    const engine = new UniversalParserEngine();
+
+    const directFetch = vi.fn().mockResolvedValue(
+      new Response('<title>Just a moment...</title>', {
+        status: 403,
+        headers: { 'cf-mitigated': 'challenge' },
+      }),
+    );
+    vi.stubGlobal('fetch', directFetch);
+
+    const proxyHandler = vi.fn(async () => ({
+      foundTab: true,
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      finalUrl: 'https://demo-origines.example/wp-admin/admin-ajax.php',
+      headers: { 'content-type': 'application/json' },
+      bodyText: JSON.stringify({
+        data: {
+          html: `<a class="ori-card" href="/oeuvre/sky-blade/">
+            <img data-src="https://demo-origines.example/uploads/sky.jpg" />
+            <span class="ori-card-title">Sky Blade</span>
+          </a>`,
+          more: false,
+        },
+      }),
+    }));
+    registerInProcessTabProxyHandler(proxyHandler);
+
+    const first = await engine.getPopular(resolved, 1);
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]?.title).toBe('Sky Blade');
+    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(proxyHandler).toHaveBeenCalledTimes(1);
+
+    // L'appel suivant doit passer directement par l'onglet ouvert sans refaire un 403 direct inutile
+    const second = await engine.getPopular(resolved, 1);
+    expect(second.items[0]?.title).toBe('Sky Blade');
+    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(proxyHandler).toHaveBeenCalledTimes(2);
+
+    // Si l'onglet lui-même reçoit encore un challenge Cloudflare, l'erreur remonte proprement
+    registerInProcessTabProxyHandler(async () => ({
+      foundTab: true,
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      headers: { 'cf-mitigated': 'challenge' },
+      bodyText: '<title>Just a moment...</title>',
+    }));
+    await expect(engine.getPopular(resolved, 1)).rejects.toBeInstanceOf(CloudflareChallengeError);
   });
 
   it('convertit une extension Keiyoushi Origines via convert.mjs', () => {
