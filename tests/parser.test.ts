@@ -526,11 +526,12 @@ describe('KumoYomi Universal Parser & Templates', () => {
     const resolved = resolveSourceWithTemplates(demoOriginesRaw, templateMap);
     const engine = new UniversalParserEngine();
 
-    const directFetch = vi.fn().mockResolvedValue(
-      new Response('<title>Just a moment...</title>', {
-        status: 403,
-        headers: { 'cf-mitigated': 'challenge' },
-      }),
+    const directFetch = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response('<title>Just a moment...</title>', {
+          status: 403,
+          headers: { 'cf-mitigated': 'challenge' },
+        }),
     );
     vi.stubGlobal('fetch', directFetch);
 
@@ -565,7 +566,7 @@ describe('KumoYomi Universal Parser & Templates', () => {
     expect(directFetch).toHaveBeenCalledTimes(1);
     expect(proxyHandler).toHaveBeenCalledTimes(2);
 
-    // Si l'onglet lui-même reçoit encore un challenge Cloudflare, l'erreur remonte proprement
+    // Si l'onglet lui-même reçoit encore un challenge Cloudflare, l'erreur remonte avec reason='tab_blocked'
     registerInProcessTabProxyHandler(async () => ({
       foundTab: true,
       ok: false,
@@ -574,7 +575,17 @@ describe('KumoYomi Universal Parser & Templates', () => {
       headers: { 'cf-mitigated': 'challenge' },
       bodyText: '<title>Just a moment...</title>',
     }));
-    await expect(engine.getPopular(resolved, 1)).rejects.toBeInstanceOf(CloudflareChallengeError);
+    await expect(engine.getPopular(resolved, 1)).rejects.toMatchObject({
+      name: 'CloudflareChallengeError',
+      reason: 'tab_blocked',
+    });
+
+    // Sans aucun onglet ouvert, l'erreur remonte avec reason='no_tab'
+    registerInProcessTabProxyHandler(async () => ({ foundTab: false }));
+    await expect(engine.getPopular(resolved, 1)).rejects.toMatchObject({
+      name: 'CloudflareChallengeError',
+      reason: 'no_tab',
+    });
   });
 
   it('récupère les images de sous-domaines CDN Cloudflare via l’onglet parent ouvert', async () => {
@@ -583,11 +594,12 @@ describe('KumoYomi Universal Parser & Templates', () => {
       .mockImplementation(() => `blob:test-image-${Math.random()}`);
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 
-    const directFetch = vi.fn().mockResolvedValue(
-      new Response('<title>Just a moment...</title>', {
-        status: 403,
-        headers: { 'cf-mitigated': 'challenge' },
-      }),
+    const directFetch = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response('<title>Just a moment...</title>', {
+          status: 403,
+          headers: { 'cf-mitigated': 'challenge' },
+        }),
     );
     vi.stubGlobal('fetch', directFetch);
 

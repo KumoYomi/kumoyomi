@@ -6,16 +6,30 @@ export class CloudflareChallengeError extends Error {
   readonly sourceName: string;
   readonly url: string;
   readonly status: number;
+  readonly reason?: 'no_tab' | 'tab_blocked';
 
-  constructor(params: { sourceId: string; sourceName: string; url: string; status: number }) {
+  constructor(params: {
+    sourceId: string;
+    sourceName: string;
+    url: string;
+    status: number;
+    reason?: 'no_tab' | 'tab_blocked';
+  }) {
+    const suffix =
+      params.reason === 'tab_blocked'
+        ? " (l'onglet ouvert renvoie lui aussi un blocage Cloudflare : rechargez-le avec F5)"
+        : params.reason === 'no_tab'
+          ? ' (aucun onglet ouvert trouvé sur ce domaine)'
+          : '';
     super(
-      `Protection Cloudflare / anti-bot détectée sur ${params.sourceName} (HTTP ${params.status}).`,
+      `Protection Cloudflare / anti-bot détectée sur ${params.sourceName} (HTTP ${params.status})${suffix}.`,
     );
     this.name = 'CloudflareChallengeError';
     this.sourceId = params.sourceId;
     this.sourceName = params.sourceName;
     this.url = params.url;
     this.status = params.status;
+    this.reason = params.reason;
   }
 }
 
@@ -220,12 +234,17 @@ async function tryFetchViaOpenTab(
   };
 }
 
-function throwCloudflareError(source: SourceConfig, status: number): never {
+function throwCloudflareError(
+  source: SourceConfig,
+  status: number,
+  reason?: 'no_tab' | 'tab_blocked',
+): never {
   throw new CloudflareChallengeError({
     sourceId: source.id,
     sourceName: source.name,
     url: source.baseUrl,
     status,
+    reason,
   });
 }
 
@@ -242,7 +261,7 @@ async function executeTimedFetch(
     if (proxied) {
       if (isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
         preferredTabProxyOrigins.delete(origin);
-        throwCloudflareError(source, proxied.response.status);
+        throwCloudflareError(source, proxied.response.status, 'tab_blocked');
       }
       preferredTabProxyOrigins.set(origin, Date.now() + TAB_PROXY_TTL_MS);
       return proxied;
@@ -289,7 +308,11 @@ async function executeTimedFetch(
       preferredTabProxyOrigins.set(origin, Date.now() + TAB_PROXY_TTL_MS);
       return proxied;
     }
-    throwCloudflareError(source, proxied?.response.status ?? response.status);
+    throwCloudflareError(
+      source,
+      proxied?.response.status ?? response.status,
+      proxied ? 'tab_blocked' : 'no_tab',
+    );
   }
 
   return {

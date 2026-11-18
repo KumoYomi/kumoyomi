@@ -42,7 +42,11 @@ interface ExtensionRuntimeLike {
     sendMessage(message: unknown): Promise<unknown>;
   };
   tabs?: {
+    query?: (queryInfo: Record<string, unknown>) => Promise<unknown[]>;
     create(opts: { url: string; active?: boolean }): Promise<unknown>;
+  };
+  scripting?: {
+    executeScript?: (opts: unknown) => Promise<unknown[]>;
   };
   permissions?: {
     contains(perms: { origins?: string[] }): Promise<boolean>;
@@ -126,7 +130,16 @@ export async function requestTabProxyFetch(
   if (inProcessTabProxyHandler) {
     return inProcessTabProxyHandler(request);
   }
-  if (isExtensionContext()) {
+  const api = getApi();
+  if (api?.tabs?.query && api?.scripting?.executeScript) {
+    try {
+      const { proxyFetchInOpenTab } = await import('@/src/core/extension/tabProxy');
+      return await proxyFetchInOpenTab(request);
+    } catch {
+      // Repli sur sendBackgroundMessage si l'appel direct échoue
+    }
+  }
+  if (api !== null) {
     return sendBackgroundMessage<TabProxyFetchResult>({
       type: 'PROXY_FETCH_IN_TAB',
       payload: request,

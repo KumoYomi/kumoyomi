@@ -13,6 +13,18 @@ const CHALLENGE_TITLE_MARKERS = [
   'ddos-guard',
 ];
 
+const MULTI_PART_TLDS = new Set([
+  'co.uk',
+  'org.uk',
+  'co.jp',
+  'ne.jp',
+  'com.au',
+  'com.br',
+  'com.mx',
+  'com.tr',
+  'co.kr',
+]);
+
 function looksLikeChallengeTitle(title?: string): boolean {
   if (!title) return false;
   const lower = title.toLowerCase();
@@ -21,7 +33,12 @@ function looksLikeChallengeTitle(title?: string): boolean {
 
 function getSiteRoot(hostname: string): string {
   const parts = hostname.toLowerCase().split('.').filter(Boolean);
-  return parts.length >= 2 ? parts.slice(-2).join('.') : hostname.toLowerCase();
+  if (parts.length <= 2) return parts.join('.');
+  const lastTwo = parts.slice(-2).join('.');
+  if (MULTI_PART_TLDS.has(lastTwo) && parts.length >= 3) {
+    return parts.slice(-3).join('.');
+  }
+  return lastTwo;
 }
 
 function matchTabToTarget(
@@ -38,12 +55,13 @@ function matchTabToTarget(
     }
 
     const tabHost = parsed.hostname.toLowerCase();
-    const isParentSubdomain =
-      targetHost === tabHost ||
-      targetHost.endsWith(`.${tabHost}`) ||
-      (fallbackTabOrigin === parsed.origin && getSiteRoot(tabHost) === getSiteRoot(targetHost));
-
-    if (isParentSubdomain) {
+    const targetRoot = getSiteRoot(targetHost);
+    const tabRoot = getSiteRoot(tabHost);
+    if (
+      tabRoot === targetRoot &&
+      (!fallbackTabOrigin ||
+        getSiteRoot(new URL(fallbackTabOrigin).hostname) === targetRoot)
+    ) {
       return { exactOrigin: false, tabOrigin: parsed.origin };
     }
     return null;
@@ -57,10 +75,18 @@ interface CandidateTab {
   tabOrigin: string;
   exactOrigin: boolean;
   score: number;
+  lastAccessed: number;
 }
 
 function getCandidateTabs(
-  tabs: Array<{ id?: number; url?: string; title?: string; active?: boolean; discarded?: boolean }>,
+  tabs: Array<{
+    id?: number;
+    url?: string;
+    title?: string;
+    active?: boolean;
+    discarded?: boolean;
+    lastAccessed?: number;
+  }>,
   targetOrigin: string,
   targetHost: string,
   fallbackTabOrigin?: string,
@@ -72,21 +98,44 @@ function getCandidateTabs(
     if (!match) continue;
     const score =
       (match.exactOrigin ? 20 : 10) +
-      (looksLikeChallengeTitle(tab.title) ? 0 : 10) +
-      (tab.discarded ? 0 : 4) +
+      (looksLikeChallengeTitle(tab.title) ? 0 : 15) +
+      (tab.discarded ? 0 : 5) +
       (tab.active ? 2 : 0);
     candidates.push({
       id: tab.id,
       tabOrigin: match.tabOrigin,
       exactOrigin: match.exactOrigin,
       score,
+      lastAccessed: tab.lastAccessed ?? 0,
     });
   }
 
   return candidates.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
+    if (a.lastAccessed !== b.lastAccessed) return b.lastAccessed - a.lastAccessed;
     return b.id - a.id;
   });
+}
+
+function isTabResultCloudflare(result: TabProxyFetchResult): boolean {
+  const status = result.status ?? 0;
+  const headers = result.headers ?? {};
+  if (headers['cf-mitigated']?.toLowerCase() === 'challenge') {
+    return true;
+  }
+  if (status === 403 || status === 503 || status === 429) {
+    const lower = (result.bodyText ?? '').toLowerCase();
+    return (
+      lower.includes('<title>just a moment...</title>') ||
+      lower.includes('<title>un instant...</title>') ||
+      lower.includes('challenges.cloudflare.com') ||
+      lower.includes('/cdn-cgi/challenge-platform/') ||
+      lower.includes('cf-browser-verification') ||
+      lower.includes('enable javascript and cookies to continue') ||
+      lower.includes('_cf_chl_opt')
+    );
+  }
+  return false;
 }
 
 async function inPageFetchExecutor(params: {
@@ -176,7 +225,7 @@ async function inPageFetchExecutor(params: {
 }
 
 /**
- * Exécute une requête fetch dans un onglet déjà ouvert et débloqué du site (ou domaine parent)
+ * Exécute une requête fetch dans un onglet déjà ouvert et débloqué du site (ou domaine lié)
  * afin de bénéficier des cookies partitionnés/Cloudflare et des en-têtes navigateur natifs.
  */
 export async function proxyFetchInOpenTab(
@@ -207,6 +256,8 @@ export async function proxyFetchInOpenTab(
     return { foundTab: false };
   }
 
+  let fallbackCloudflareResult: TabProxyFetchResult | null = null;
+
   for (const tab of candidates) {
     const isCrossOrigin = !tab.exactOrigin;
     if (isCrossOrigin) {
@@ -231,12 +282,21 @@ export async function proxyFetchInOpenTab(
         args: [payload],
       });
       const firstResult = results[0]?.result as TabProxyFetchResult | undefined;
-      if (firstResult?.foundTab) {
-        return firstResult;
+      if (!firstResult?.foundTab) continue;
+
+      if (isTabResultCloudflare(firstResult)) {
+        fallbackCloudflareResult = firstResult;
+        continue;
       }
+
+      return firstResult;
     } catch {
       // Onglet inaccessible ou fermé : essai sur le candidat suivant
     }
+  }
+
+  if (fallbackCloudflareResult) {
+    return fallbackCloudflareResult;
   }
 
   return { foundTab: false };
