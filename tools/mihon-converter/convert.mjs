@@ -10,6 +10,7 @@ const SUPPORTED_THEMES = new Set([
   'fuzzydoodle',
   'mmrcms',
   'scanreader',
+  'iken',
 ]);
 
 function parseArgs(argv) {

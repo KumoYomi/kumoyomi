@@ -18,6 +18,7 @@ import type {
   ParsedChapterItem,
   ParsedMangaDetails,
   ParsedPageItem,
+  ResponseType,
   SourceConfig,
 } from '@/src/core/types/source';
 
@@ -61,6 +62,166 @@ function readSingleAttribute(element: Element, attrName: string): string {
   return element.getAttribute(attrName) ?? '';
 }
 
+function splitSelectorAlternatives(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote = '';
+  let current = '';
+  for (let i = 0; i < selector.length; i += 1) {
+    const ch = selector[i]!;
+    if (quote) {
+      current += ch;
+      if (ch === quote && selector[i - 1] !== '\\') quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[') depth += 1;
+    else if (ch === ')' || ch === ']') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+function findBalancedParenEnd(str: string, openIdx: number): number {
+  let depth = 0;
+  let quote = '';
+  for (let i = openIdx; i < str.length; i += 1) {
+    const ch = str[i]!;
+    if (quote) {
+      if (ch === quote && str[i - 1] !== '\\') quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(') depth += 1;
+    else if (ch === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function querySingleCompatSelector(scope: ParentNode, part: string): Element[] {
+  if (!part.includes(':contains')) {
+    try {
+      return Array.from(scope.querySelectorAll(part));
+    } catch {
+      return [];
+    }
+  }
+
+  // Handle outer `:has(...:contains...)` patterns
+  const hasIdx = part.indexOf(':has(');
+  if (hasIdx !== -1) {
+    const openIdx = hasIdx + 4;
+    const closeIdx = findBalancedParenEnd(part, openIdx);
+    if (closeIdx !== -1) {
+      const inner = part.slice(openIdx + 1, closeIdx);
+      if (inner.includes(':contains')) {
+        const prefix = part.slice(0, hasIdx).trim() || '*';
+        const suffix = part.slice(closeIdx + 1).trim();
+        const hosts = querySingleCompatSelector(scope, prefix).filter(
+          (el) => querySelectorAllCompat(el, inner).length > 0,
+        );
+        if (!suffix) return hosts;
+        const out: Element[] = [];
+        for (const host of hosts) {
+          if (suffix.startsWith('+')) {
+            const restSel = suffix.slice(1).trim();
+            if (host.nextElementSibling && (!restSel || host.nextElementSibling.matches(restSel))) {
+              out.push(host.nextElementSibling);
+            }
+          } else {
+            const normalizedSuffix = suffix.startsWith('>') ? `:scope ${suffix}` : suffix;
+            out.push(...querySelectorAllCompat(host, normalizedSuffix));
+          }
+        }
+        return out;
+      }
+    }
+  }
+
+  // Handle `:contains(...)` and `:containsOwn(...)`
+  const match = /^([\s\S]*?):(containsOwn|contains)\((['"]?)(.*?)\3\)([\s\S]*)$/.exec(part);
+  if (!match) {
+    try {
+      return Array.from(scope.querySelectorAll(part));
+    } catch {
+      return [];
+    }
+  }
+
+  const rawPrefix = (match[1] ?? '').trim();
+  const mode = match[2];
+  const needle = (match[4] ?? '').trim().toLowerCase();
+  const rest = (match[5] ?? '').trim();
+  const baseSelector = !rawPrefix || rawPrefix.endsWith('>') || rawPrefix.endsWith('+') || rawPrefix.endsWith('~')
+    ? `${rawPrefix} *`.trim()
+    : rawPrefix;
+
+  let baseNodes: Element[] = [];
+  try {
+    baseNodes = Array.from(scope.querySelectorAll(baseSelector));
+  } catch {
+    baseNodes = [];
+  }
+
+  const matched = baseNodes.filter((el) => {
+    const text = (mode === 'containsOwn' ? readOwnText(el) : (el.textContent ?? '')).toLowerCase();
+    return text.includes(needle);
+  });
+
+  if (!rest) return matched;
+
+  const out: Element[] = [];
+  for (const el of matched) {
+    if (rest.startsWith('+')) {
+      const sibSel = rest.slice(1).trim();
+      const nextEl = el.nextElementSibling;
+      if (nextEl && (!sibSel || querySelectorAllCompat(el.parentElement ?? scope, sibSel).includes(nextEl))) {
+        out.push(nextEl);
+      }
+    } else {
+      const normalizedRest = rest.startsWith('>') ? `:scope ${rest}` : rest;
+      out.push(...querySelectorAllCompat(el, normalizedRest));
+    }
+  }
+  return out;
+}
+
+function querySelectorAllCompat(scope: ParentNode, selector: string): Element[] {
+  const clean = selector.trim();
+  if (!clean) return [];
+  if (!clean.includes(':contains')) {
+    try {
+      return Array.from(scope.querySelectorAll(clean));
+    } catch {
+      return [];
+    }
+  }
+  const seen = new Set<Element>();
+  const result: Element[] = [];
+  for (const alt of splitSelectorAlternatives(clean)) {
+    for (const el of querySingleCompatSelector(scope, alt)) {
+      if (!seen.has(el)) {
+        seen.add(el);
+        result.push(el);
+      }
+    }
+  }
+  return result;
+}
+
 function findMatchingElements(scope: ParentNode, extractor: FieldExtractor): Element[] {
   if (!extractor.selector) {
     return scope instanceof Element ? [scope] : [];
@@ -77,7 +238,7 @@ function findMatchingElements(scope: ParentNode, extractor: FieldExtractor): Ele
         ? scope instanceof Element
           ? [scope]
           : []
-        : Array.from(scope.querySelectorAll(sel));
+        : querySelectorAllCompat(scope, sel);
     if (found.length > 0) {
       nodes = found;
       break;
@@ -213,11 +374,20 @@ export function extractDomField(
   return applyPostProcessing(raw, extractor, baseUrl, pageUrl);
 }
 
-function renderJsonTemplate(template: string, item: unknown): string {
+function renderJsonTemplate(
+  template: string,
+  item: unknown,
+  baseUrl: string,
+  mangaUrl?: string,
+  vars?: Record<string, string>,
+): string {
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, rawKey: string) => {
-    const val = getByDotPath(item, rawKey.trim());
-    if (val === null || val === undefined) return '';
-    return Array.isArray(val) ? val.join(', ') : String(val);
+    const key = rawKey.trim();
+    const val = getByDotPath(item, key);
+    if (val !== null && val !== undefined) {
+      return Array.isArray(val) ? val.map(stringifyJsonElement).join(', ') : String(val);
+    }
+    return interpolateTemplate(`{{${key}}}`, { baseUrl, mangaUrl, vars });
   });
 }
 
@@ -242,7 +412,7 @@ export function extractJsonField(
 
   let raw = '';
   if (extractor.jsonTemplate) {
-    raw = renderJsonTemplate(extractor.jsonTemplate, item);
+    raw = renderJsonTemplate(extractor.jsonTemplate, item, baseUrl, mangaUrl, vars);
   } else {
     const rawPaths =
       extractor.jsonPath ??
@@ -268,7 +438,7 @@ export function extractJsonField(
 
 function getHtmlDocumentFromResponse(
   res: FetchedResponse,
-  responseType: 'html' | 'json' | 'json-html' | undefined,
+  responseType: ResponseType | undefined,
   jsonHtmlPath?: string,
 ): Document {
   if (responseType === 'json-html' && res.json !== undefined) {
@@ -396,7 +566,7 @@ export class UniversalParserEngine {
     }
 
     const doc = getHtmlDocumentFromResponse(res, responseType, endpoint.request.jsonHtmlPath);
-    const nodes = endpoint.itemSelector ? Array.from(doc.querySelectorAll(endpoint.itemSelector)) : [];
+    const nodes = endpoint.itemSelector ? querySelectorAllCompat(doc, endpoint.itemSelector) : [];
 
     for (const el of nodes) {
       const title = extractDomField(el, endpoint.fields.title, source.baseUrl, res.finalUrl);
@@ -414,7 +584,7 @@ export class UniversalParserEngine {
     if (responseType === 'json-html' && endpoint.hasNextPageJsonPath) {
       hasNextPage = Boolean(getByDotPath(res.json, endpoint.hasNextPageJsonPath));
     } else if (endpoint.hasNextPageSelector) {
-      hasNextPage = Boolean(doc.querySelector(endpoint.hasNextPageSelector));
+      hasNextPage = querySelectorAllCompat(doc, endpoint.hasNextPageSelector).length > 0;
     } else if (endpoint.pageSize) {
       hasNextPage = items.length >= endpoint.pageSize;
     }
@@ -451,22 +621,26 @@ export class UniversalParserEngine {
     const res = await fetchSourceResponse(source, cfg.request, { mangaUrl });
     const responseType = cfg.request.responseType ?? 'html';
 
-    if (responseType === 'json') {
-      const title = extractJsonField(res.json, cfg.fields.title, source.baseUrl, source.vars);
-      const rawStatus = extractJsonField(res.json, cfg.fields.status, source.baseUrl, source.vars);
-      const genresRaw = extractJsonField(res.json, cfg.fields.genres, source.baseUrl, source.vars);
-      const altRaw = extractJsonField(res.json, cfg.fields.altTitles, source.baseUrl, source.vars);
+    if (responseType === 'json' || responseType === 'nextjs-flight') {
+      const jsonRoot =
+        responseType === 'nextjs-flight' && Array.isArray(res.json)
+          ? res.json[0]
+          : res.json;
+      const title = extractJsonField(jsonRoot, cfg.fields.title, source.baseUrl, source.vars);
+      const rawStatus = extractJsonField(jsonRoot, cfg.fields.status, source.baseUrl, source.vars);
+      const genresRaw = extractJsonField(jsonRoot, cfg.fields.genres, source.baseUrl, source.vars);
+      const altRaw = extractJsonField(jsonRoot, cfg.fields.altTitles, source.baseUrl, source.vars);
       return {
         title: title || 'Untitled',
         url: mangaUrl,
         coverUrl:
-          extractJsonField(res.json, cfg.fields.cover, source.baseUrl, source.vars) || undefined,
+          extractJsonField(jsonRoot, cfg.fields.cover, source.baseUrl, source.vars) || undefined,
         author:
-          extractJsonField(res.json, cfg.fields.author, source.baseUrl, source.vars) || undefined,
+          extractJsonField(jsonRoot, cfg.fields.author, source.baseUrl, source.vars) || undefined,
         artist:
-          extractJsonField(res.json, cfg.fields.artist, source.baseUrl, source.vars) || undefined,
+          extractJsonField(jsonRoot, cfg.fields.artist, source.baseUrl, source.vars) || undefined,
         description:
-          extractJsonField(res.json, cfg.fields.description, source.baseUrl, source.vars) ||
+          extractJsonField(jsonRoot, cfg.fields.description, source.baseUrl, source.vars) ||
           undefined,
         status: mapPublicationStatus(rawStatus, cfg.statusMap),
         genres: genresRaw
@@ -601,10 +775,29 @@ export class UniversalParserEngine {
     const cfg = source.chapters;
     const responseType = cfg.request?.responseType ?? 'html';
 
-    if (responseType === 'json') {
-      const rawList = getByDotPath(res.json, cfg.itemsPath);
-      const list = Array.isArray(rawList) ? rawList : [];
+    if (responseType === 'json' || responseType === 'nextjs-flight') {
+      const flightBase =
+        responseType === 'nextjs-flight' && Array.isArray(res.json) && cfg.itemsPath
+          ? res.json[0]
+          : res.json;
+      const rawList = getByDotPath(flightBase, cfg.itemsPath);
+      let list: unknown[] = [];
+      if (Array.isArray(rawList)) {
+        list = rawList;
+      } else if (
+        cfg.objectEntriesKeyField &&
+        rawList &&
+        typeof rawList === 'object'
+      ) {
+        const keyField = cfg.objectEntriesKeyField;
+        list = Object.entries(rawList as Record<string, unknown>).map(([k, val]) =>
+          val && typeof val === 'object' && !Array.isArray(val)
+            ? { ...(val as Record<string, unknown>), [keyField]: k }
+            : { value: val, [keyField]: k },
+        );
+      }
       const chapters: ParsedChapterItem[] = [];
+      const seenUrls = new Set<string>();
       for (const entry of list) {
         const title = extractJsonField(
           entry,
@@ -620,7 +813,8 @@ export class UniversalParserEngine {
           source.vars,
           mangaUrl,
         );
-        if (!title || !url) continue;
+        if (!title || !url || seenUrls.has(url)) continue;
+        seenUrls.add(url);
         const rawNum = extractJsonField(
           entry,
           cfg.fields.chapterNumber,
@@ -657,7 +851,7 @@ export class UniversalParserEngine {
     pageUrl: string,
   ): ParsedChapterItem[] {
     const cfg = source.chapters;
-    const nodes = cfg.itemSelector ? Array.from(doc.querySelectorAll(cfg.itemSelector)) : [];
+    const nodes = cfg.itemSelector ? querySelectorAllCompat(doc, cfg.itemSelector) : [];
     const chapters: ParsedChapterItem[] = [];
 
     for (const el of nodes) {
@@ -684,12 +878,60 @@ export class UniversalParserEngine {
     const res = await fetchSourceResponse(source, cfg.request, { chapterUrl });
     const responseType = cfg.request.responseType ?? 'html';
 
-    if (responseType === 'json') {
+    if (responseType === 'json' || responseType === 'nextjs-flight') {
       if (cfg.numberedPages) {
         return this.buildNumberedPages(source, res.json, chapterUrl, cfg.numberedPages);
       }
+
+      if (cfg.findEntry) {
+        const flightBase =
+          responseType === 'nextjs-flight' && Array.isArray(res.json) && cfg.findEntry.itemsPath
+            ? res.json[0]
+            : res.json;
+        const container = getByDotPath(flightBase, cfg.findEntry.itemsPath);
+        const candidates = Array.isArray(container) ? container : [];
+        const targetMatch = interpolateTemplate(cfg.findEntry.matchTemplate, {
+          baseUrl: source.baseUrl,
+          chapterUrl,
+          vars: source.vars,
+        });
+        const matched = candidates.find((entry) => {
+          const v = getByDotPath(entry, cfg.findEntry!.matchField);
+          return v !== undefined && v !== null && String(v) === targetMatch;
+        });
+        if (!matched) return [];
+
+        let rawImages: unknown[] = [];
+        if (cfg.findEntry.parseJsonArrayField) {
+          const encoded = getByDotPath(matched, cfg.findEntry.parseJsonArrayField);
+          if (typeof encoded === 'string') {
+            try {
+              const parsed = JSON.parse(encoded);
+              if (Array.isArray(parsed)) rawImages = parsed;
+            } catch {
+              rawImages = [];
+            }
+          }
+        } else if (cfg.findEntry.itemsArrayField) {
+          const arr = getByDotPath(matched, cfg.findEntry.itemsArrayField);
+          if (Array.isArray(arr)) rawImages = arr;
+        }
+
+        const extractor = cfg.imageUrl ?? { jsonPath: '', absoluteUrl: true };
+        const foundPages: ParsedPageItem[] = [];
+        for (const imgEntry of rawImages) {
+          const url = extractJsonField(imgEntry, extractor, source.baseUrl, source.vars);
+          if (url) foundPages.push({ index: foundPages.length, imageUrl: url });
+        }
+        return foundPages;
+      }
+
       if (!cfg.imageUrl) return [];
-      const rawList = getByDotPath(res.json, cfg.itemsPath);
+      const flightBase =
+        responseType === 'nextjs-flight' && Array.isArray(res.json) && cfg.itemsPath
+          ? res.json[0]
+          : res.json;
+      const rawList = getByDotPath(flightBase, cfg.itemsPath);
       const list = Array.isArray(rawList) ? rawList : [];
       const pages: ParsedPageItem[] = [];
       for (const entry of list) {
@@ -699,6 +941,67 @@ export class UniversalParserEngine {
         }
       }
       return pages;
+    }
+
+    if (cfg.followPageLinks) {
+      const initialDoc = getHtmlDocumentFromResponse(res, responseType, cfg.request.jsonHtmlPath);
+      const optionNodes = querySelectorAllCompat(initialDoc, cfg.followPageLinks.itemSelector);
+      const baseOrigin = res.finalUrl || chapterUrl;
+      const pageUrls: string[] = [];
+      const seen = new Set<string>();
+      for (const node of optionNodes) {
+        const rawHref = readSingleAttribute(node, cfg.followPageLinks.urlAttr ?? 'value').trim();
+        if (!rawHref) continue;
+        try {
+          const abs = new URL(rawHref, baseOrigin).toString();
+          if (!seen.has(abs)) {
+            seen.add(abs);
+            pageUrls.push(abs);
+          }
+        } catch {
+          // Ignore invalid link
+        }
+      }
+
+      const limitedUrls = pageUrls.slice(0, 200);
+      const results = new Array<string | null>(limitedUrls.length).fill(null);
+      let cursor = 0;
+      const runBatch = async () => {
+        while (cursor < limitedUrls.length) {
+          const idx = cursor++;
+          const targetUrl = limitedUrls[idx];
+          if (!targetUrl) continue;
+          try {
+            const pageRes = await fetchSourceResponse(
+              source,
+              { method: 'GET', url: targetUrl, headers: cfg.request.headers },
+              { chapterUrl: targetUrl },
+            );
+            const pDoc = parseHtmlDocument(pageRes.text);
+            const imgUrl = extractDomField(
+              pDoc,
+              {
+                selector: cfg.followPageLinks!.imageSelector,
+                attr: cfg.followPageLinks!.imageAttr ?? ['data-src', 'src'],
+                absoluteUrl: true,
+              },
+              source.baseUrl,
+              pageRes.finalUrl || targetUrl,
+            );
+            if (imgUrl && !imgUrl.startsWith('data:image/gif')) {
+              results[idx] = imgUrl;
+            }
+          } catch {
+            // Continue remaining pages if one fails
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(6, limitedUrls.length || 1) }, () => runBatch()),
+      );
+      return results
+        .filter((u): u is string => Boolean(u))
+        .map((imageUrl, index) => ({ index, imageUrl }));
     }
 
     if (cfg.scriptJson) {
@@ -745,7 +1048,7 @@ export class UniversalParserEngine {
     }
 
     const doc = getHtmlDocumentFromResponse(res, responseType, cfg.request.jsonHtmlPath);
-    const nodes = cfg.itemSelector ? Array.from(doc.querySelectorAll(cfg.itemSelector)) : [];
+    const nodes = cfg.itemSelector ? querySelectorAllCompat(doc, cfg.itemSelector) : [];
     const pages: ParsedPageItem[] = [];
 
     for (const el of nodes) {

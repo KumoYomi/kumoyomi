@@ -146,6 +146,8 @@ function mergeChaptersConfig(
     fallbackInline: override?.fallbackInline ?? base?.fallbackInline,
     extractVarsFromDetails:
       override?.extractVarsFromDetails ?? base?.extractVarsFromDetails,
+    objectEntriesKeyField:
+      override?.objectEntriesKeyField ?? base?.objectEntriesKeyField,
     itemsPath: override?.itemsPath ?? base?.itemsPath,
     itemSelector: override?.itemSelector ?? base?.itemSelector,
     fields,
@@ -160,7 +162,9 @@ function mergePagesConfig(
   const request = override?.request ?? base?.request;
   const imageUrl = override?.imageUrl ?? base?.imageUrl;
   const numberedPages = override?.numberedPages ?? base?.numberedPages;
-  if (!request || (!imageUrl && !numberedPages)) {
+  const findEntry = override?.findEntry ?? base?.findEntry;
+  const followPageLinks = override?.followPageLinks ?? base?.followPageLinks;
+  if (!request || (!imageUrl && !numberedPages && !findEntry && !followPageLinks)) {
     throw new Error(
       'Missing "pages.request" or "pages.imageUrl" / "pages.numberedPages" configuration.',
     );
@@ -173,6 +177,8 @@ function mergePagesConfig(
     numberedPages,
     scriptJson: override?.scriptJson ?? base?.scriptJson,
     scriptArrayRegex: override?.scriptArrayRegex ?? base?.scriptArrayRegex,
+    findEntry,
+    followPageLinks,
   };
 }
 

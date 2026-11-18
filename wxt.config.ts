@@ -14,7 +14,7 @@ export default defineConfig({
     short_name: 'KumoYomi',
     description:
       '100% local decentralized manga reader and aggregator powered by external JSON source repositories.',
-    version: '0.4.3',
+    version: '0.4.4',
     icons: {
       16: 'icon/16.png',
       32: 'icon/32.png',

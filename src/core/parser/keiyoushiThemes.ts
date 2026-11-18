@@ -855,6 +855,105 @@ export const BUILT_IN_KEIYOUSHI_TEMPLATES: Record<string, SourceTemplateConfig> 
       },
     },
   },
+
+  iken: {
+    id: 'iken',
+    name: 'Iken REST JSON Theme',
+    lang: 'en',
+    vars: {
+      apiUrl: '',
+    },
+    popular: {
+      request: {
+        method: 'GET',
+        url: '{{vars.apiUrl}}/api/query?perPage=18&orderBy=totalViews&orderDirection=desc&page={{page}}',
+        responseType: 'json',
+      },
+      itemsPath: 'posts',
+      fields: {
+        title: { jsonPath: 'postTitle' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/series/' },
+        cover: { jsonPath: 'featuredImage', absoluteUrl: true },
+      },
+      hasNextPageCalc: { totalPath: 'totalCount', pageSize: 18 },
+    },
+    latest: {
+      request: {
+        method: 'GET',
+        url: '{{vars.apiUrl}}/api/query?perPage=18&orderBy=updatedAt&orderDirection=desc&page={{page}}',
+        responseType: 'json',
+      },
+      itemsPath: 'posts',
+      fields: {
+        title: { jsonPath: 'postTitle' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/series/' },
+        cover: { jsonPath: 'featuredImage', absoluteUrl: true },
+      },
+      hasNextPageCalc: { totalPath: 'totalCount', pageSize: 18 },
+    },
+    search: {
+      request: {
+        method: 'GET',
+        url: '{{vars.apiUrl}}/api/query?perPage=18&searchTerm={{encodedQuery}}&page={{page}}',
+        responseType: 'json',
+      },
+      itemsPath: 'posts',
+      fields: {
+        title: { jsonPath: 'postTitle' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/series/' },
+        cover: { jsonPath: 'featuredImage', absoluteUrl: true },
+      },
+      hasNextPageCalc: { totalPath: 'totalCount', pageSize: 18 },
+    },
+    mangaDetails: {
+      request: {
+        method: 'GET',
+        url: '{{vars.apiUrl}}/api/post?postSlug={{mangaSlug}}',
+        responseType: 'json',
+      },
+      fields: {
+        title: { jsonPath: 'post.postTitle' },
+        cover: { jsonPath: 'post.featuredImage', absoluteUrl: true },
+        author: { jsonPath: 'post.author' },
+        artist: { jsonPath: 'post.artist' },
+        description: { jsonPath: 'post.postContent' },
+        genres: { jsonPath: 'post.genres', joinAll: ', ' },
+        altTitles: { jsonPath: 'post.alternativeTitles' },
+        status: { jsonPath: 'post.seriesStatus' },
+      },
+      statusMap: {
+        ongoing: 'ongoing',
+        coming_soon: 'ongoing',
+        mass_released: 'ongoing',
+        completed: 'completed',
+        cancelled: 'cancelled',
+        dropped: 'cancelled',
+      },
+    },
+    chapters: {
+      request: {
+        method: 'GET',
+        url: '{{vars.apiUrl}}/api/post?postSlug={{mangaSlug}}',
+        responseType: 'json',
+      },
+      itemsPath: 'post.chapters',
+      fields: {
+        title: { jsonTemplate: 'Chapter {{number}} - {{title}}' },
+        url: { jsonTemplate: '{{baseUrl}}/series/{{mangaSlug}}/{{slug}}?id={{id}}' },
+        date: { jsonPath: 'createdAt' },
+        chapterNumber: { jsonPath: 'number' },
+      },
+    },
+    pages: {
+      request: {
+        method: 'GET',
+        url: '{{vars.apiUrl}}/api/chapter?chapterId={{chapterQueryId}}',
+        responseType: 'json',
+      },
+      itemsPath: 'chapter.images',
+      imageUrl: { jsonPath: 'url', absoluteUrl: true },
+    },
+  },
 };
 
 export const SUPPORTED_THEME_IDS = new Set(Object.keys(BUILT_IN_KEIYOUSHI_TEMPLATES));
@@ -881,6 +980,426 @@ function extractLiteralUrlFromKt(ktContent: string, varOrFuncHint: RegExp): stri
  * Toutes les URLs proviennent exclusivement de `meta.baseUrl` ou du fichier `.kt` importé.
  */
 export const FRENCH_CUSTOM_RECIPES: Record<string, CustomRecipeFactory> = {
+  aniverse: (meta) => ({
+    id: meta.id,
+    name: meta.name,
+    lang: meta.lang,
+    baseUrl: meta.baseUrl,
+    ...(meta.nsfw ? { nsfw: true } : {}),
+    popular: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/anime/search?media=manga&page={{page}}&pageSize=40',
+        responseType: 'json',
+      },
+      itemsPath: 'data',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'image', absoluteUrl: true },
+      },
+      hasNextPageCalc: { totalPath: 'total', limitPath: 'pageSize', pagePath: 'page' },
+    },
+    latest: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/manga?page={{page}}',
+        responseType: 'json',
+      },
+      itemsPath: 'items',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'image', absoluteUrl: true },
+      },
+      hasNextPageJsonPath: 'hasNextPage',
+    },
+    search: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/anime/search?media=manga&q={{encodedQuery}}&page={{page}}&pageSize=40',
+        responseType: 'json',
+      },
+      itemsPath: 'data',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'image', absoluteUrl: true },
+      },
+      hasNextPageCalc: { totalPath: 'total', limitPath: 'pageSize', pagePath: 'page' },
+    },
+    mangaDetails: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/manga/{{mangaSlug}}',
+        responseType: 'nextjs-flight',
+        flightMatchKeys: ['manga', 'chapters'],
+      },
+      fields: {
+        title: { jsonPath: 'manga.title.userPreferred' },
+        cover: { jsonPath: 'manga.coverImage.large', absoluteUrl: true },
+        description: {
+          jsonPath: 'manga.description',
+          replace: [{ pattern: '<br\\s*/?>', replacement: '\n', flags: 'gi' }],
+        },
+        author: { jsonPath: 'manga.authors', joinAll: ', ' },
+        artist: { jsonPath: 'manga.artists', joinAll: ', ' },
+        genres: { jsonPath: 'manga.genres', joinAll: ', ' },
+        status: { jsonPath: 'manga.status' },
+      },
+      statusMap: {
+        releasing: 'ongoing',
+        finished: 'completed',
+        hiatus: 'hiatus',
+        cancelled: 'cancelled',
+      },
+    },
+    chapters: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/manga/{{mangaSlug}}',
+        responseType: 'nextjs-flight',
+        flightMatchKeys: ['manga', 'chapters'],
+      },
+      itemsPath: 'chapters',
+      reverseOrder: true,
+      fields: {
+        title: { jsonTemplate: 'Chapitre {{number}} - {{title}}' },
+        url: { jsonTemplate: '{{baseUrl}}/read/{{mangaSlug}}/{{id}}' },
+        date: { jsonPath: 'updatedAt' },
+        chapterNumber: { jsonPath: 'number' },
+      },
+    },
+    pages: {
+      request: {
+        method: 'GET',
+        url: '{{chapterUrl}}',
+        responseType: 'nextjs-flight',
+        flightMatchKeys: ['pages', 'locked'],
+      },
+      itemsPath: 'pages',
+      imageUrl: { jsonPath: 'src', absoluteUrl: true },
+    },
+  }),
+
+  bigsolo: (meta) => ({
+    id: meta.id,
+    name: meta.name,
+    lang: meta.lang,
+    baseUrl: meta.baseUrl,
+    ...(meta.nsfw ? { nsfw: true } : {}),
+    popular: {
+      request: { method: 'GET', url: '{{baseUrl}}/data/series', responseType: 'json' },
+      itemsPath: 'reco',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'cover.url_hq', absoluteUrl: true },
+      },
+    },
+    latest: {
+      request: { method: 'GET', url: '{{baseUrl}}/data/series', responseType: 'json' },
+      itemsPath: 'series',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'cover.url_hq', absoluteUrl: true },
+      },
+    },
+    search: {
+      request: { method: 'GET', url: '{{baseUrl}}/data/series', responseType: 'json' },
+      itemsPath: 'series',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'cover.url_hq', absoluteUrl: true },
+      },
+    },
+    mangaDetails: {
+      request: { method: 'GET', url: '{{baseUrl}}/data/series/{{mangaSlug}}', responseType: 'json' },
+      fields: {
+        title: { jsonPath: 'title' },
+        cover: { jsonPath: 'cover.url_hq', absoluteUrl: true },
+        author: { jsonPath: 'author' },
+        artist: { jsonPath: 'artist' },
+        description: { jsonPath: 'description' },
+        genres: { jsonPath: 'tags', joinAll: ', ' },
+        status: { jsonPath: 'status' },
+      },
+      statusMap: {
+        'en cours': 'ongoing',
+        finis: 'completed',
+        fini: 'completed',
+      },
+    },
+    chapters: {
+      request: { method: 'GET', url: '{{baseUrl}}/data/series/{{mangaSlug}}', responseType: 'json' },
+      itemsPath: 'chapters',
+      objectEntriesKeyField: '_chapterNum',
+      reverseOrder: true,
+      fields: {
+        title: { jsonTemplate: 'Ch. {{_chapterNum}} – {{title}}' },
+        url: { jsonTemplate: '{{baseUrl}}/manga/{{mangaSlug}}/{{_chapterNum}}' },
+        date: { jsonPath: 'timestamp' },
+        chapterNumber: { jsonPath: '_chapterNum' },
+      },
+    },
+    pages: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/data/series/{{chapterParentSlug}}/{{chapterSlug}}',
+        responseType: 'json',
+      },
+      itemsPath: 'images',
+      imageUrl: { jsonPath: '', absoluteUrl: true },
+    },
+  }),
+
+  blossomscans: (meta) => ({
+    id: meta.id,
+    name: meta.name,
+    lang: meta.lang,
+    baseUrl: meta.baseUrl,
+    ...(meta.nsfw ? { nsfw: true } : {}),
+    popular: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/series?page={{page}}&limit=36&sort=popularity',
+        responseType: 'json',
+      },
+      itemsPath: 'data',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/serie/' },
+        cover: { jsonPath: 'cover', absoluteUrl: true },
+      },
+      hasNextPageCalc: {
+        totalPath: 'pagination.totalPages',
+        pagePath: 'pagination.page',
+        pageSize: 1,
+      },
+    },
+    latest: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/series?page={{page}}&limit=36&sort=recents',
+        responseType: 'json',
+      },
+      itemsPath: 'data',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/serie/' },
+        cover: { jsonPath: 'cover', absoluteUrl: true },
+      },
+      hasNextPageCalc: {
+        totalPath: 'pagination.totalPages',
+        pagePath: 'pagination.page',
+        pageSize: 1,
+      },
+    },
+    search: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/series?page={{page}}&limit=36&sort=popularity&search={{encodedQuery}}',
+        responseType: 'json',
+      },
+      itemsPath: 'data',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/serie/' },
+        cover: { jsonPath: 'cover', absoluteUrl: true },
+      },
+      hasNextPageCalc: {
+        totalPath: 'pagination.totalPages',
+        pagePath: 'pagination.page',
+        pageSize: 1,
+      },
+    },
+    mangaDetails: {
+      request: { method: 'GET', url: '{{baseUrl}}/api/series/{{mangaSlug}}', responseType: 'json' },
+      fields: {
+        title: { jsonPath: 'title' },
+        cover: { jsonPath: 'cover', absoluteUrl: true },
+        author: { jsonPath: 'author' },
+        artist: { jsonPath: 'artist' },
+        description: { jsonPath: 'synopsis' },
+        genres: { jsonPath: 'genres', joinAll: ', ' },
+        status: { jsonPath: 'status' },
+      },
+      statusMap: {
+        ongoing: 'ongoing',
+        completed: 'completed',
+        hiatus: 'hiatus',
+      },
+    },
+    chapters: {
+      request: { method: 'GET', url: '{{baseUrl}}/api/series/{{mangaSlug}}', responseType: 'json' },
+      itemsPath: 'chapters',
+      fields: {
+        title: { jsonTemplate: 'Chapitre {{number}} - {{title}}' },
+        url: { jsonTemplate: '{{baseUrl}}/serie/{{mangaSlug}}/chapitre/{{number}}?id={{chapterId}}' },
+        date: { jsonPath: 'publishedAt' },
+        chapterNumber: { jsonPath: 'number' },
+      },
+    },
+    pages: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/series/{{chapterPath[1]}}',
+        responseType: 'json',
+      },
+      findEntry: {
+        itemsPath: 'chapters',
+        matchField: 'chapterId',
+        matchTemplate: '{{chapterQueryId}}',
+        parseJsonArrayField: 'pages',
+      },
+      imageUrl: { jsonPath: '', absoluteUrl: true },
+    },
+  }),
+
+  lelscan: (meta) => ({
+    id: meta.id,
+    name: meta.name,
+    lang: meta.lang,
+    baseUrl: meta.baseUrl,
+    ...(meta.nsfw ? { nsfw: true } : {}),
+    popular: {
+      request: { method: 'GET', url: '{{baseUrl}}/lecture-en-ligne-one-piece' },
+      itemSelector: '#navigation select:first-of-type option',
+      fields: {
+        title: {},
+        url: { attr: 'value', absoluteUrl: true },
+      },
+    },
+    latest: {
+      request: { method: 'GET', url: '{{baseUrl}}/lecture-en-ligne-one-piece' },
+      itemSelector: '#main_hot_ul li',
+      fields: {
+        title: { selector: 'a.hot_manga_img', attr: 'title', replace: [{ pattern: '\\s+Scan$', replacement: '' }] },
+        url: { selector: 'a.hot_manga_img', attr: 'href', absoluteUrl: true },
+        cover: { selector: 'a.hot_manga_img img', attr: ['data-src', 'src'], absoluteUrl: true },
+      },
+    },
+    mangaDetails: {
+      request: { method: 'GET', url: '{{mangaUrl}}' },
+      fields: {
+        title: {
+          selector: ['#header-image h2 span[itemprop=title]', '#header-image h2', 'h1'],
+          replace: [{ pattern: '^Lecture en ligne\\s+', replacement: '' }],
+        },
+        cover: { selector: 'meta[property="og:image"]', attr: 'content', absoluteUrl: true },
+      },
+    },
+    chapters: {
+      fallbackInline: true,
+      itemSelector: '#navigation select:nth-of-type(2) option',
+      fields: {
+        title: { prefix: 'Chapitre ' },
+        url: { attr: 'value', absoluteUrl: true },
+      },
+    },
+    pages: {
+      request: { method: 'GET', url: '{{chapterUrl}}/1' },
+      followPageLinks: {
+        itemSelector: '#navigation select:nth-of-type(3) option',
+        urlAttr: 'value',
+        imageSelector: '#image img',
+        imageAttr: ['data-src', 'src'],
+      },
+    },
+  }),
+
+  rimuscans: (meta) => ({
+    id: meta.id,
+    name: meta.name,
+    lang: meta.lang,
+    baseUrl: meta.baseUrl,
+    ...(meta.nsfw ? { nsfw: true } : {}),
+    popular: {
+      request: { method: 'GET', url: '{{baseUrl}}/api/series?sort=rating&page={{page}}', responseType: 'json' },
+      itemsPath: 'series',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'cover_url', absoluteUrl: true },
+      },
+      hasNextPageJsonPath: 'has_more',
+    },
+    latest: {
+      request: { method: 'GET', url: '{{baseUrl}}/api/series?page={{page}}', responseType: 'json' },
+      itemsPath: 'series',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'cover_url', absoluteUrl: true },
+      },
+      hasNextPageJsonPath: 'has_more',
+    },
+    search: {
+      request: {
+        method: 'GET',
+        url: '{{baseUrl}}/api/series?search={{encodedQuery}}&page={{page}}',
+        responseType: 'json',
+      },
+      itemsPath: 'series',
+      fields: {
+        title: { jsonPath: 'title' },
+        url: { jsonPath: 'slug', prefix: '{{baseUrl}}/manga/' },
+        cover: { jsonPath: 'cover_url', absoluteUrl: true },
+      },
+      hasNextPageJsonPath: 'has_more',
+    },
+    mangaDetails: {
+      request: {
+        method: 'GET',
+        url: '{{mangaUrl}}',
+        responseType: 'json',
+        scriptJson: {
+          selector: 'script[type="application/ld+json"]',
+          regex: '(\\{[\\s\\S]*"ComicSeries"[\\s\\S]*\\})',
+        },
+      },
+      fields: {
+        title: { jsonPath: 'name' },
+        cover: { jsonPath: 'image', absoluteUrl: true },
+        description: { jsonPath: 'description' },
+        author: { jsonPath: 'author.name' },
+        artist: { jsonPath: 'illustrator.name' },
+        genres: { jsonPath: 'genre', joinAll: ', ' },
+      },
+    },
+    chapters: {
+      request: {
+        method: 'GET',
+        url: '{{mangaUrl}}',
+        responseType: 'nextjs-flight',
+        flightMatchKeys: ['number', 'type', 'images'],
+      },
+      itemsPath: '',
+      fields: {
+        title: { jsonTemplate: 'Chapitre {{number}} - {{title}}' },
+        url: { jsonTemplate: '{{baseUrl}}/read/{{mangaSlug}}/{{number}}' },
+        date: { jsonPath: 'releaseDate' },
+        chapterNumber: { jsonPath: 'number' },
+      },
+    },
+    pages: {
+      request: {
+        method: 'GET',
+        url: '{{chapterUrl}}',
+        responseType: 'nextjs-flight',
+        flightMatchKeys: ['number', 'images'],
+      },
+      findEntry: {
+        matchField: 'number',
+        matchTemplate: '{{chapterSlug}}',
+        itemsArrayField: 'images',
+      },
+      imageUrl: { jsonPath: 'url', absoluteUrl: true },
+    },
+  }),
+
   dassouscan: (meta) => ({
     id: meta.id,
     name: meta.name,
@@ -889,43 +1408,73 @@ export const FRENCH_CUSTOM_RECIPES: Record<string, CustomRecipeFactory> = {
     ...(meta.nsfw ? { nsfw: true } : {}),
     popular: {
       request: { method: 'GET', url: '{{baseUrl}}/catalogue?tri=popular&page={{page}}' },
-      itemSelector: 'article.dsc-cat-card',
+      itemSelector: 'article.dsc-cat-card, article.ap-rel',
       fields: {
-        title: { selector: '.dsc-cat-card__title a' },
+        title: { selector: ['.dsc-cat-card__title a', 'a.ap-rel__title'] },
         url: {
-          selector: 'a.dsc-cat-card__cover-link, .dsc-cat-card__title a, a.dsc-cat-card__open',
+          selector: [
+            'a.dsc-cat-card__cover-link',
+            '.dsc-cat-card__title a',
+            'a.dsc-cat-card__open',
+            'a.ap-rel__cover',
+            'a.ap-rel__title',
+          ],
           attr: 'href',
           absoluteUrl: true,
         },
-        cover: { selector: '.dsc-cat-card__cover img', attr: ['data-src', 'src'], absoluteUrl: true },
+        cover: {
+          selector: ['.dsc-cat-card__cover img', '.ap-rel__cover img'],
+          attr: ['data-src', 'src'],
+          absoluteUrl: true,
+        },
       },
       hasNextPageSelector: 'a.dsc-cat__pager-btn[href]:contains(Suivant)',
     },
     latest: {
       request: { method: 'GET', url: '{{baseUrl}}/catalogue?tri=latest&page={{page}}' },
-      itemSelector: 'article.dsc-cat-card',
+      itemSelector: 'article.dsc-cat-card, article.ap-rel',
       fields: {
-        title: { selector: '.dsc-cat-card__title a' },
+        title: { selector: ['.dsc-cat-card__title a', 'a.ap-rel__title'] },
         url: {
-          selector: 'a.dsc-cat-card__cover-link, .dsc-cat-card__title a, a.dsc-cat-card__open',
+          selector: [
+            'a.dsc-cat-card__cover-link',
+            '.dsc-cat-card__title a',
+            'a.dsc-cat-card__open',
+            'a.ap-rel__cover',
+            'a.ap-rel__title',
+          ],
           attr: 'href',
           absoluteUrl: true,
         },
-        cover: { selector: '.dsc-cat-card__cover img', attr: ['data-src', 'src'], absoluteUrl: true },
+        cover: {
+          selector: ['.dsc-cat-card__cover img', '.ap-rel__cover img'],
+          attr: ['data-src', 'src'],
+          absoluteUrl: true,
+        },
       },
       hasNextPageSelector: 'a.dsc-cat__pager-btn[href]:contains(Suivant)',
     },
     search: {
       request: { method: 'GET', url: '{{baseUrl}}/catalogue?q={{encodedQuery}}&page={{page}}' },
-      itemSelector: 'article.dsc-cat-card',
+      itemSelector: 'article.dsc-cat-card, article.ap-rel',
       fields: {
-        title: { selector: '.dsc-cat-card__title a' },
+        title: { selector: ['.dsc-cat-card__title a', 'a.ap-rel__title'] },
         url: {
-          selector: 'a.dsc-cat-card__cover-link, .dsc-cat-card__title a, a.dsc-cat-card__open',
+          selector: [
+            'a.dsc-cat-card__cover-link',
+            '.dsc-cat-card__title a',
+            'a.dsc-cat-card__open',
+            'a.ap-rel__cover',
+            'a.ap-rel__title',
+          ],
           attr: 'href',
           absoluteUrl: true,
         },
-        cover: { selector: '.dsc-cat-card__cover img', attr: ['data-src', 'src'], absoluteUrl: true },
+        cover: {
+          selector: ['.dsc-cat-card__cover img', '.ap-rel__cover img'],
+          attr: ['data-src', 'src'],
+          absoluteUrl: true,
+        },
       },
       hasNextPageSelector: 'a.dsc-cat__pager-btn[href]:contains(Suivant)',
     },
@@ -1520,6 +2069,13 @@ export function buildThemeSourceConfig(
   const apiPath = extractKotlinStringOverride(ktContent, 'apiPath');
   if (apiPath) vars.apiPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
 
+  if (themeId === 'iken') {
+    const customApiUrl = extractKotlinStringOverride(ktContent, 'apiUrl');
+    vars.apiUrl = (
+      customApiUrl ?? meta.baseUrl.replace(/^https?:\/\//i, 'https://api.')
+    ).replace(/\/+$/, '');
+  }
+
   const config: RawSourceConfig = {
     id: meta.id,
     name: meta.name,
@@ -1634,7 +2190,7 @@ export function compileFrenchKotlinSource(
     };
   }
 
-  if (/\b(?:Bitmap|Canvas|WebView)\b|descramble/i.test(ktContent)) {
+  if (/\b(?:Bitmap|Canvas|WebView|VrfSigner|LelCall)\b|descramble/i.test(ktContent)) {
     return { compatible: false, reason: 'incompatible_canvas' };
   }
   if (/turnstile|recaptcha/i.test(ktContent)) {

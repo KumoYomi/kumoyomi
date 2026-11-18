@@ -8,6 +8,7 @@ import {
 } from '@/src/core/extension/browserBridge';
 import type {
   RequestConfig,
+  ResponseType,
   ScriptJsonExtractionConfig,
   SourceConfig,
 } from '@/src/core/types/source';
@@ -155,11 +156,23 @@ export function interpolateTemplate(template: string, variables: TemplateVariabl
     chapterQueryId: extractQueryId(chapterUrl),
   };
 
+  const extractSegments = (rawUrl: string) =>
+    extractPath(rawUrl)
+      .split('/')
+      .filter(Boolean);
+  const mangaSegs = extractSegments(mangaUrl);
+  const chapterSegs = extractSegments(chapterUrl);
+
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, rawKey: string) => {
     const key = rawKey.trim();
     if (key.startsWith('vars.')) {
       const varName = key.slice(5);
       return variables.vars?.[varName] ?? '';
+    }
+    const segMatch = /^(manga|chapter)Path\[(\d+)\]$/.exec(key);
+    if (segMatch) {
+      const idx = Number.parseInt(segMatch[2] ?? '0', 10);
+      return (segMatch[1] === 'manga' ? mangaSegs[idx] : chapterSegs[idx]) ?? '';
     }
     return replacements[key] ?? '';
   });
@@ -397,7 +410,7 @@ async function executeTimedFetch(
 interface PreparedSourceRequest {
   url: string;
   init: RequestInit;
-  responseType: 'html' | 'json' | 'json-html';
+  responseType: ResponseType;
   cacheKey: string;
 }
 
@@ -521,6 +534,120 @@ export function extractJsonFromHtmlScript(
   throw new Error(`Unable to extract embedded script JSON from ${sourceName}.`);
 }
 
+function collectMatchingObjects(
+  node: unknown,
+  requiredKeys: string[],
+  out: unknown[],
+): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectMatchingObjects(item, requiredKeys, out);
+    return;
+  }
+  const rec = node as Record<string, unknown>;
+  if (
+    requiredKeys.length > 0 &&
+    requiredKeys.every((k) => Object.prototype.hasOwnProperty.call(rec, k))
+  ) {
+    out.push(rec);
+  }
+  for (const val of Object.values(rec)) {
+    collectMatchingObjects(val, requiredKeys, out);
+  }
+}
+
+function unescapeNextJsChunk(rawEscaped: string): string {
+  try {
+    return JSON.parse(`"${rawEscaped}"`) as string;
+  } catch {
+    return rawEscaped
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t');
+  }
+}
+
+function scanJsonValuesInText(text: string): unknown[] {
+  const results: unknown[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch !== '{' && ch !== '[') {
+      i += 1;
+      continue;
+    }
+    const open = ch;
+    const close = open === '{' ? '}' : ']';
+    let depth = 0;
+    let inStr = false;
+    let escaped = false;
+    let end = -1;
+    for (let j = i; j < text.length; j += 1) {
+      const c = text[j];
+      if (inStr) {
+        if (escaped) {
+          escaped = false;
+        } else if (c === '\\') {
+          escaped = true;
+        } else if (c === '"') {
+          inStr = false;
+        }
+        continue;
+      }
+      if (c === '"') {
+        inStr = true;
+      } else if (c === open) {
+        depth += 1;
+      } else if (c === close) {
+        depth -= 1;
+        if (depth === 0) {
+          end = j + 1;
+          break;
+        }
+      }
+    }
+    if (end > i) {
+      const slice = text.slice(i, end);
+      try {
+        results.push(JSON.parse(slice));
+        i = end;
+        continue;
+      } catch {
+        // Not valid standalone JSON, advance past opening brace
+      }
+    }
+    i += 1;
+  }
+  return results;
+}
+
+/**
+ * Extrait les objets JSON embarqués dans les chunks Next.js App Router (`self.__next_f.push([1,"..."])`).
+ */
+export function extractNextJsFlightObjects(
+  html: string,
+  requiredKeys: string[] = [],
+): unknown[] {
+  const pushRe = /self\.__next_f\.push\(\[\s*1\s*,\s*"((?:[^"\\]|\\.)*)"\s*\]\)/g;
+  const decodedParts: string[] = [];
+  for (const match of html.matchAll(pushRe)) {
+    if (match[1]) {
+      decodedParts.push(unescapeNextJsChunk(match[1]));
+    }
+  }
+  const combined = decodedParts.length > 0 ? decodedParts.join('\n') : html;
+  const parsedRoots = scanJsonValuesInText(combined);
+  if (requiredKeys.length === 0) {
+    return parsedRoots;
+  }
+  const matched: unknown[] = [];
+  for (const root of parsedRoots) {
+    collectMatchingObjects(root, requiredKeys, matched);
+  }
+  return matched;
+}
+
 export async function fetchSourceResponse(
   source: SourceConfig,
   reqConfig: RequestConfig,
@@ -567,7 +694,9 @@ export async function fetchSourceResponse(
   }
 
   let json: unknown = undefined;
-  if (responseType === 'json' || responseType === 'json-html') {
+  if (responseType === 'nextjs-flight') {
+    json = extractNextJsFlightObjects(text, reqConfig.flightMatchKeys ?? []);
+  } else if (responseType === 'json' || responseType === 'json-html') {
     if (reqConfig.scriptJson) {
       json = extractJsonFromHtmlScript(text, reqConfig.scriptJson, source.name);
     } else {

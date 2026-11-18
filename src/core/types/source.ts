@@ -35,7 +35,7 @@ export interface FieldExtractor {
   base64Reverse?: boolean;
 }
 
-export type ResponseType = 'html' | 'json' | 'json-html';
+export type ResponseType = 'html' | 'json' | 'json-html' | 'nextjs-flight';
 
 export interface ScriptJsonExtractionConfig {
   /** Optional CSS selector targeting the <script> element (e.g. "script#__NEXT_DATA__"). Defaults to scanning all <script> tags. */
@@ -56,6 +56,8 @@ export interface RequestConfig {
   jsonHtmlPath?: string;
   /** Extract embedded JSON from <script> tags inside an HTML document (e.g. __NEXT_DATA__, ts_reader.run). */
   scriptJson?: ScriptJsonExtractionConfig;
+  /** Clés requises pour extraire les objets cibles d'un payload Next.js App Router (`self.__next_f.push`). */
+  flightMatchKeys?: string[];
 }
 
 export interface CatalogueEndpointConfig {
@@ -107,6 +109,8 @@ export interface ChaptersEndpointConfig {
   fallbackInline?: boolean;
   /** Variables extraites depuis le HTML de la fiche manga avant d'envoyer chapters.request (ex: nonce, mangaId). */
   extractVarsFromDetails?: Record<string, FieldExtractor>;
+  /** Si `itemsPath` pointe vers un dictionnaire `{ key: entry }`, injecte la clé dans ce champ avant mapping. */
+  objectEntriesKeyField?: string;
   itemsPath?: string;
   itemSelector?: string;
   fields: {
@@ -142,6 +146,21 @@ export interface PagesEndpointConfig {
   scriptJson?: ScriptJsonExtractionConfig & { itemsPath?: string };
   /** Expression régulière (groupe 1) répétée sur le texte de la page (tableaux JS inline). */
   scriptArrayRegex?: string;
+  /** Sélectionne un sous-objet dans un tableau JSON (ex: chapitre par ID) puis lit ou parse son tableau d'images. */
+  findEntry?: {
+    itemsPath?: string;
+    matchField: string;
+    matchTemplate: string;
+    parseJsonArrayField?: string;
+    itemsArrayField?: string;
+  };
+  /** Extrait une liste de liens de pages individuelles (ex: menu <select>) puis récupère l'image sur chaque page. */
+  followPageLinks?: {
+    itemSelector: string;
+    urlAttr?: string;
+    imageSelector: string;
+    imageAttr?: string | string[];
+  };
 }
 
 export interface SourceConfig {

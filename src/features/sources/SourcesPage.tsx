@@ -1,11 +1,14 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   AlertTriangle,
+  BookOpen,
   CheckCircle2,
   Compass,
   FileJson,
   FolderGit2,
+  LayoutGrid,
   Link2,
+  List,
   Loader2,
   Play,
   Plus,
@@ -43,7 +46,7 @@ import {
   KEIYOUSHI_DEFAULT_REPO_URL,
   type KeiyoushiCatalogScanResult,
   parseKeiyoushiRepoUrl,
-  scanKeiyoushiFrCatalog,
+  scanKeiyoushiCatalog,
 } from '@/src/core/parser/keiyoushiImporter';
 import {
   addOrRefreshRepositoryByUrl,
@@ -395,6 +398,7 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
   const [permissionsMap, setPermissionsMap] = useState<Record<string, boolean>>({});
   const [sourceQuery, setSourceQuery] = useState('');
   const [langFilter, setLangFilter] = useState<string>('all');
+  const [sourceAgeFilter, setSourceAgeFilter] = useState<'all' | 'sfw' | 'nsfw'>('all');
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sessionNonce, setSessionNonce] = useState(0);
   const [inspectingSourceId, setInspectingSourceId] = useState<string | null>(null);
@@ -406,6 +410,9 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
   const [keiyoushiSelected, setKeiyoushiSelected] = useState<Set<string>>(() => new Set());
   const [keiyoushiSearch, setKeiyoushiSearch] = useState('');
   const [keiyoushiFilter, setKeiyoushiFilter] = useState<'ready' | 'all'>('ready');
+  const [keiyoushiAgeFilter, setKeiyoushiAgeFilter] = useState<'all' | 'sfw' | 'nsfw'>('all');
+  const [keiyoushiSort, setKeiyoushiSort] = useState<'compat' | 'name-asc' | 'name-desc'>('compat');
+  const [keiyoushiView, setKeiyoushiView] = useState<'list' | 'grid'>('list');
   const [keiyoushiInstalling, setKeiyoushiInstalling] = useState<{
     done: number;
     total: number;
@@ -428,12 +435,15 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
     const q = sourceQuery.trim().toLowerCase();
     return sources.filter((s) => {
       if (langFilter !== 'all' && s.lang.toLowerCase() !== langFilter) return false;
+      const isNsfw = Boolean(s.resolvedConfig?.nsfw ?? s.rawConfig?.nsfw);
+      if (sourceAgeFilter === 'sfw' && isNsfw) return false;
+      if (sourceAgeFilter === 'nsfw' && !isNsfw) return false;
       if (q && !s.name.toLowerCase().includes(q) && !s.baseUrl.toLowerCase().includes(q)) {
         return false;
       }
       return true;
     });
-  }, [sources, langFilter, sourceQuery]);
+  }, [sources, langFilter, sourceAgeFilter, sourceQuery]);
 
   useEffect(() => {
     let active = true;
@@ -449,24 +459,62 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
     };
   }, [sources]);
 
+  const installedIdsSet = useMemo(() => new Set(sources.map((s) => s.id)), [sources]);
+  const installedBaseUrlsSet = useMemo(
+    () => new Set(sources.map((s) => s.baseUrl.replace(/\/+$/, '').toLowerCase())),
+    [sources],
+  );
+
   const filteredKeiyoushiEntries = useMemo(() => {
     if (!keiyoushiScan) return [];
     const q = keiyoushiSearch.trim().toLowerCase();
-    return keiyoushiScan.entries.filter((entry) => {
-      if (keiyoushiFilter === 'ready' && !entry.compatible) return false;
-      if (
-        q &&
-        !entry.name.toLowerCase().includes(q) &&
-        !entry.baseUrl.toLowerCase().includes(q) &&
-        !(entry.theme ?? '').toLowerCase().includes(q)
-      ) {
-        return false;
-      }
-      return true;
-    });
-  }, [keiyoushiScan, keiyoushiSearch, keiyoushiFilter]);
+    const list = keiyoushiScan.entries
+      .map((entry) => ({
+        ...entry,
+        alreadyInstalled:
+          entry.alreadyInstalled ||
+          installedIdsSet.has(entry.id) ||
+          installedBaseUrlsSet.has(entry.baseUrl.replace(/\/+$/, '').toLowerCase()),
+      }))
+      .filter((entry) => {
+        if (keiyoushiFilter === 'ready' && !entry.compatible) return false;
+        if (keiyoushiAgeFilter === 'sfw' && entry.nsfw) return false;
+        if (keiyoushiAgeFilter === 'nsfw' && !entry.nsfw) return false;
+        if (
+          q &&
+          !entry.name.toLowerCase().includes(q) &&
+          !entry.baseUrl.toLowerCase().includes(q) &&
+          !(entry.theme ?? '').toLowerCase().includes(q) &&
+          !entry.slug.toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+        return true;
+      });
 
-  async function startKeiyoushiScan(rawUrl: string) {
+    const sorted = [...list];
+    sorted.sort((a, b) => {
+      if (keiyoushiSort === 'name-asc') {
+        return a.name.localeCompare(b.name, 'fr');
+      }
+      if (keiyoushiSort === 'name-desc') {
+        return b.name.localeCompare(a.name, 'fr');
+      }
+      if (a.compatible !== b.compatible) return a.compatible ? -1 : 1;
+      return a.name.localeCompare(b.name, 'fr');
+    });
+    return sorted;
+  }, [
+    keiyoushiScan,
+    installedIdsSet,
+    installedBaseUrlsSet,
+    keiyoushiSearch,
+    keiyoushiFilter,
+    keiyoushiAgeFilter,
+    keiyoushiSort,
+  ]);
+
+  async function startKeiyoushiScan(rawUrl: string, langOverride?: string) {
     const normalized = rawUrl.trim();
     if (!normalized) return;
     const permPromise =
@@ -479,13 +527,18 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
     setKeiyoushiScanProgress({ done: 0, total: 0 });
     try {
       if (permPromise) await permPromise;
-      const scan = await scanKeiyoushiFrCatalog(normalized, (done, total) => {
-        setKeiyoushiScanProgress({ done, total });
-      });
+      const scan = await scanKeiyoushiCatalog(
+        normalized,
+        (done, total) => {
+          setKeiyoushiScanProgress({ done, total });
+        },
+        langOverride,
+      );
       setKeiyoushiScan(scan);
+      setRepoUrlInput(scan.target.canonicalRepoUrl);
       setKeiyoushiSearch('');
       setKeiyoushiFilter('ready');
-      // Pré-sélectionne rien par défaut si beaucoup de sources ou garde les déjà installées décochées pour un choix explicite propre
+      // Pré-sélectionne rien par défaut pour un choix explicite propre
       setKeiyoushiSelected(new Set());
     } catch (err) {
       setFeedback({
@@ -541,9 +594,21 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
         slugs,
         (done, total) => setKeiyoushiInstalling({ done, total }),
       );
-      setKeiyoushiScan(null);
+      const installedSlugs = new Set(slugs);
+      const skippedNames = new Set(res.skipped.map((s) => s.name));
+      setKeiyoushiScan((prev) =>
+        prev
+          ? {
+              ...prev,
+              entries: prev.entries.map((entry) =>
+                installedSlugs.has(entry.slug) && !skippedNames.has(entry.name)
+                  ? { ...entry, alreadyInstalled: true }
+                  : entry,
+              ),
+            }
+          : null,
+      );
       setKeiyoushiSelected(new Set());
-      setRepoUrlInput('');
       setFeedback({
         kind: 'ok',
         text:
@@ -692,7 +757,7 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
     try {
       for (const repo of remoteRepos) {
         if (parseKeiyoushiRepoUrl(repo.url)) {
-          const scan = await scanKeiyoushiFrCatalog(repo.url);
+          const scan = await scanKeiyoushiCatalog(repo.url);
           const installedIdsForRepo = new Set(
             sources.filter((s) => s.repoId === repo.id).map((s) => s.id),
           );
@@ -880,20 +945,47 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                   compatible: keiyoushiScan.compatibleCount,
                   total: keiyoushiScan.entries.length,
                   branch: keiyoushiScan.branch,
+                  lang: keiyoushiScan.target.langCode,
                 })}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setKeiyoushiScan(null)}
-              className="ky-chip inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs"
-            >
-              <X className="h-3.5 w-3.5" />
-              {t('sources.keiyoushiClose')}
-            </button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="ky-surface flex items-center gap-1 rounded-xl border p-0.5 text-[11px]">
+                {(['fr', 'en', 'es', 'all'] as const).map((langOption) => {
+                  const active = keiyoushiScan.target.langCode === langOption;
+                  return (
+                    <button
+                      key={langOption}
+                      type="button"
+                      disabled={addingRepo || Boolean(keiyoushiInstalling)}
+                      onClick={() =>
+                        void startKeiyoushiScan(keiyoushiScan.target.canonicalRepoUrl, langOption)
+                      }
+                      className={`rounded-lg px-2.5 py-1 font-semibold uppercase transition ${
+                        active
+                          ? 'ky-btn-primary'
+                          : 'ky-muted hover:text-[var(--ky-text-heading)]'
+                      }`}
+                    >
+                      {langOption}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setKeiyoushiScan(null)}
+                className="ky-chip inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs"
+              >
+                <X className="h-3.5 w-3.5" />
+                {t('sources.keiyoushiClose')}
+              </button>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-0 flex-1 sm:max-w-xs">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-50" />
               <input
@@ -905,11 +997,11 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
               />
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 onClick={() => setKeiyoushiFilter('ready')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
                   keiyoushiFilter === 'ready' ? 'ky-chip-active' : 'ky-chip'
                 }`}
               >
@@ -918,11 +1010,73 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
               <button
                 type="button"
                 onClick={() => setKeiyoushiFilter('all')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
                   keiyoushiFilter === 'all' ? 'ky-chip-active' : 'ky-chip'
                 }`}
               >
                 {t('sources.keiyoushiFilterAll', { count: keiyoushiScan.entries.length })}
+              </button>
+            </div>
+
+            <div className="ky-surface flex items-center gap-1 rounded-xl border p-0.5 text-[11px]">
+              {(
+                [
+                  ['all', t('sources.keiyoushiAgeAll')],
+                  ['sfw', t('sources.keiyoushiAgeSfw')],
+                  ['nsfw', t('sources.keiyoushiAgeNsfw')],
+                ] as const
+              ).map(([ageKey, ageLabel]) => (
+                <button
+                  key={ageKey}
+                  type="button"
+                  onClick={() => setKeiyoushiAgeFilter(ageKey)}
+                  className={`rounded-lg px-2 py-1 font-medium transition ${
+                    keiyoushiAgeFilter === ageKey
+                      ? 'ky-btn-primary'
+                      : 'ky-muted hover:text-[var(--ky-text-heading)]'
+                  }`}
+                >
+                  {ageLabel}
+                </button>
+              ))}
+            </div>
+
+            <div className="w-40">
+              <CustomSelect
+                value={keiyoushiSort}
+                onChange={(v) => setKeiyoushiSort(v as 'compat' | 'name-asc' | 'name-desc')}
+                options={[
+                  { value: 'compat', label: t('sources.keiyoushiSortCompat') },
+                  { value: 'name-asc', label: t('sources.keiyoushiSortNameAsc') },
+                  { value: 'name-desc', label: t('sources.keiyoushiSortNameDesc') },
+                ]}
+              />
+            </div>
+
+            <div className="ky-surface flex items-center gap-1 rounded-xl border p-0.5">
+              <button
+                type="button"
+                title={t('sources.keiyoushiViewList')}
+                onClick={() => setKeiyoushiView('list')}
+                className={`rounded-lg p-1.5 transition ${
+                  keiyoushiView === 'list'
+                    ? 'ky-btn-primary'
+                    : 'ky-muted hover:text-[var(--ky-text-heading)]'
+                }`}
+              >
+                <List className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                title={t('sources.keiyoushiViewGrid')}
+                onClick={() => setKeiyoushiView('grid')}
+                className={`rounded-lg p-1.5 transition ${
+                  keiyoushiView === 'grid'
+                    ? 'ky-btn-primary'
+                    : 'ky-muted hover:text-[var(--ky-text-heading)]'
+                }`}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
               </button>
             </div>
 
@@ -946,7 +1100,13 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
             </div>
           </div>
 
-          <div className="grid max-h-96 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+          <div
+            className={
+              keiyoushiView === 'list'
+                ? 'max-h-96 space-y-1.5 overflow-y-auto pr-1'
+                : 'grid max-h-96 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3'
+            }
+          >
             {filteredKeiyoushiEntries.map((entry) => {
               const checked = keiyoushiSelected.has(entry.slug);
               const reasonLabel =
@@ -960,6 +1120,58 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                 hostname = new URL(entry.baseUrl).hostname.replace(/^www\./, '');
               } catch {
                 // Keep baseUrl fallback
+              }
+
+              if (keiyoushiView === 'list') {
+                return (
+                  <label
+                    key={entry.slug}
+                    className={`flex items-center gap-3 rounded-xl border px-3 py-2 text-xs transition ${
+                      entry.compatible
+                        ? checked
+                          ? 'cursor-pointer border-sky-400/60 bg-sky-500/10'
+                          : 'cursor-pointer border-[var(--ky-border)] hover:border-sky-400/40'
+                        : 'cursor-not-allowed border-[var(--ky-border)] opacity-55'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={!entry.compatible || Boolean(keiyoushiInstalling)}
+                      checked={checked}
+                      onChange={() => toggleKeiyoushiSelection(entry.slug)}
+                      className="h-4 w-4 shrink-0 rounded accent-sky-400"
+                    />
+                    <span className="ky-heading min-w-0 flex-1 truncate font-semibold">
+                      {entry.name}
+                    </span>
+                    {entry.nsfw && (
+                      <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-rose-300">
+                        18+
+                      </span>
+                    )}
+                    {entry.alreadyInstalled && (
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                        {t('sources.keiyoushiInstalledBadge')}
+                      </span>
+                    )}
+                    <span className="ky-soft hidden truncate text-[11px] sm:inline sm:max-w-[180px]">
+                      {hostname}
+                    </span>
+                    <span className="shrink-0 text-[10px]">
+                      {entry.compatible ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {reasonLabel}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+                          <AlertTriangle className="h-3 w-3" />
+                          {reasonLabel}
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                );
               }
 
               return (
@@ -1121,6 +1333,17 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-1.5">
+                  {Boolean(parseKeiyoushiRepoUrl(repo.url)) && (
+                    <button
+                      type="button"
+                      disabled={addingRepo}
+                      onClick={() => void startKeiyoushiScan(repo.url)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/20 disabled:opacity-50"
+                    >
+                      <BookOpen className="h-3.5 w-3.5" />
+                      {t('sources.keiyoushiOpenCatalog')}
+                    </button>
+                  )}
                   {!repo.url.startsWith('local://') && (
                     <button
                       type="button"
@@ -1173,6 +1396,28 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                   className="ky-input w-full rounded-xl py-1.5 pl-8 pr-3 text-xs sm:w-48"
                 />
               </div>
+              <div className="ky-surface flex flex-wrap items-center gap-1 rounded-xl border p-0.5 text-[11px]">
+                {(
+                  [
+                    ['all', t('sources.keiyoushiAgeAll')],
+                    ['sfw', t('sources.keiyoushiAgeSfw')],
+                    ['nsfw', t('sources.keiyoushiAgeNsfw')],
+                  ] as const
+                ).map(([ageKey, ageLabel]) => (
+                  <button
+                    key={ageKey}
+                    type="button"
+                    onClick={() => setSourceAgeFilter(ageKey)}
+                    className={`rounded-lg px-2 py-1 font-medium transition ${
+                      sourceAgeFilter === ageKey
+                        ? 'ky-btn-primary'
+                        : 'ky-muted hover:text-[var(--ky-text-heading)]'
+                    }`}
+                  >
+                    {ageLabel}
+                  </button>
+                ))}
+              </div>
               {availableLangs.length > 1 && (
                 <div className="ky-surface flex flex-wrap items-center gap-1 rounded-xl border p-0.5 text-[11px]">
                   <button
@@ -1219,6 +1464,11 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                       <span className="rounded-md bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold uppercase text-zinc-300">
                         {source.lang}
                       </span>
+                      {Boolean(source.resolvedConfig?.nsfw ?? source.rawConfig?.nsfw) && (
+                        <span className="rounded-md bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold text-rose-300">
+                          18+
+                        </span>
+                      )}
                       {source.extendsId && (
                         <span className="rounded-md bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-300">
                           {t('sources.templateBadge', { id: source.extendsId })}

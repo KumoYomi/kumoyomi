@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CircleHelp,
   Columns2,
+  ExternalLink,
   Eye,
   FileImage,
   HardDrive,
@@ -811,6 +812,18 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
+              {sourceChapterUrl && (
+                <a
+                  href={sourceChapterUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={t('reader.openChapterOnWebsiteTitle')}
+                  className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-2 py-1.5 text-xs font-medium text-slate-200 transition hover:bg-white/10"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span className="hidden xl:inline">{t('reader.openChapterOnWebsite')}</span>
+                </a>
+              )}
             </div>
 
             {/* Modes de lecture */}

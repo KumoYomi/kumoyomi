@@ -1523,4 +1523,328 @@ describe('Keiyoushi / Mihon FR Importer & Compiler', () => {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it('supports iken multisrc theme with apiUrl derivation and chapterQueryId pages', async () => {
+    const rawCfg = buildThemeSourceConfig(
+      {
+        slug: 'vortexdemo',
+        id: 'vortex-demo-en',
+        name: 'Vortex Demo',
+        lang: 'en',
+        baseUrl: 'https://vortex-demo.example',
+        theme: 'iken',
+      },
+      'iken',
+      `class VortexDemo : Iken("Vortex Demo", "en", "https://vortex-demo.example", "https://api.vortex-demo.example")`,
+    );
+    const tplMap = new Map(Object.entries(BUILT_IN_KEIYOUSHI_TEMPLATES));
+    const resolved = resolveSourceWithTemplates(rawCfg, tplMap);
+    expect(resolved.vars?.apiUrl).toBe('https://api.vortex-demo.example');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === 'https://api.vortex-demo.example/api/post?postSlug=solo-demo') {
+        return new Response(
+          JSON.stringify({
+            post: {
+              postTitle: 'Solo Demo',
+              featuredImage: 'https://cdn.vortex-demo.example/cover.webp',
+              chapters: [
+                { id: 901, slug: 'chapter-1', number: '1', title: 'Awaken', createdAt: '2026-10-01' },
+              ],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://api.vortex-demo.example/api/chapter?chapterId=901') {
+        return new Response(
+          JSON.stringify({
+            chapter: {
+              images: [
+                { url: 'https://cdn.vortex-demo.example/p1.webp' },
+                { url: 'https://cdn.vortex-demo.example/p2.webp' },
+              ],
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const chapters = await parserEngine.getChapters(
+      resolved,
+      'https://vortex-demo.example/series/solo-demo',
+    );
+    expect(chapters).toHaveLength(1);
+    expect(chapters[0]?.url).toBe('https://vortex-demo.example/series/solo-demo/chapter-1?id=901');
+
+    const pages = await parserEngine.getChapterPages(
+      resolved,
+      chapters[0]!.url,
+    );
+    expect(pages.map((p) => p.imageUrl)).toEqual([
+      'https://cdn.vortex-demo.example/p1.webp',
+      'https://cdn.vortex-demo.example/p2.webp',
+    ]);
+  });
+
+  it('supports objectEntriesKeyField, findEntry+parseJsonArrayField, followPageLinks, and nextjs-flight recipes', async () => {
+    const tplMap = new Map(Object.entries(BUILT_IN_KEIYOUSHI_TEMPLATES));
+
+    const bigsolo = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.bigsolo!(
+        { slug: 'bigsolo', id: 'bigsolo-fr', name: 'BigSolo', lang: 'fr', baseUrl: 'https://bs-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+    const blossom = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.blossomscans!(
+        { slug: 'blossomscans', id: 'blossomscans-fr', name: 'Blossom Scans', lang: 'fr', baseUrl: 'https://blossom-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+    const lelscan = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.lelscan!(
+        { slug: 'lelscan', id: 'lelscan-fr', name: 'Lelscan', lang: 'fr', baseUrl: 'https://lel-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+    const rimu = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.rimuscans!(
+        { slug: 'rimuscans', id: 'rimuscans-fr', name: 'Rimu Scans', lang: 'fr', baseUrl: 'https://rimu-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+    const aniverse = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.aniverse!(
+        { slug: 'aniverse', id: 'aniverse-fr', name: 'Aniverse', lang: 'fr', baseUrl: 'https://ani-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === 'https://bs-demo.example/data/series/one-demo') {
+        return new Response(
+          JSON.stringify({
+            title: 'One Demo',
+            chapters: {
+              '10': { title: 'Dix', timestamp: 1700000000 },
+              '11': { title: 'Onze', timestamp: 1700001000 },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://bs-demo.example/data/series/one-demo/11') {
+        return new Response(
+          JSON.stringify({ images: ['https://bs-demo.example/11/01.jpg'] }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://blossom-demo.example/api/series/flower-demo') {
+        return new Response(
+          JSON.stringify({
+            title: 'Flower Demo',
+            chapters: [
+              {
+                chapterId: 'ch-abc',
+                number: '5',
+                title: 'Bloom',
+                pages: JSON.stringify([
+                  'https://cdn.blossom-demo.example/5/1.webp',
+                  'https://cdn.blossom-demo.example/5/2.webp',
+                ]),
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://lel-demo.example/scan-demo/100/1') {
+        return new Response(
+          `<html>
+            <div id="navigation">
+              <select></select>
+              <select></select>
+              <select>
+                <option value="/scan-demo/100/1">1</option>
+                <option value="/scan-demo/100/2">2</option>
+              </select>
+            </div>
+            <div id="image"><img src="/imgs/p1.png" /></div>
+          </html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://lel-demo.example/scan-demo/100/2') {
+        return new Response(
+          `<html><div id="image"><img src="/imgs/p2.png" /></div></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://rimu-demo.example/manga/slime-demo') {
+        const flightPayload = JSON.stringify([
+          '0',
+          {
+            initialChapters: [
+              { number: 12, title: 'Tempest', type: 'chapter', images: [{ url: '/p/1.jpg' }], releaseDate: '2026-10-10' },
+            ],
+          },
+        ]);
+        return new Response(
+          `<html><script>self.__next_f.push([1,${JSON.stringify(`5:${flightPayload}\n`)}])</script></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://rimu-demo.example/read/slime-demo/12') {
+        const flightPayload = JSON.stringify([
+          '0',
+          {
+            chapters: [
+              { number: '12', images: [{ url: '/rimu/12/1.webp' }, { url: '/rimu/12/2.webp' }] },
+            ],
+          },
+        ]);
+        return new Response(
+          `<html><script>self.__next_f.push([1,${JSON.stringify(`6:${flightPayload}\n`)}])</script></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://ani-demo.example/read/hero-demo/ch99') {
+        const flightPayload = JSON.stringify([
+          '0',
+          {
+            locked: false,
+            pages: [{ src: 'https://cdn.ani-demo.example/ch99/1.webp' }],
+          },
+        ]);
+        return new Response(
+          `<html><script>self.__next_f.push([1,${JSON.stringify(`9:${flightPayload}\n`)}])</script></html>`,
+          { status: 200 },
+        );
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // BigSolo keyed object chapters & images
+    const bsChapters = await parserEngine.getChapters(bigsolo, 'https://bs-demo.example/manga/one-demo');
+    expect(bsChapters.map((c) => c.title)).toEqual(['Ch. 11 – Onze', 'Ch. 10 – Dix']);
+    const bsPages = await parserEngine.getChapterPages(bigsolo, bsChapters[0]!.url);
+    expect(bsPages.map((p) => p.imageUrl)).toEqual(['https://bs-demo.example/11/01.jpg']);
+
+    // BlossomScans findEntry + stringified JSON pages array
+    const blPages = await parserEngine.getChapterPages(
+      blossom,
+      'https://blossom-demo.example/serie/flower-demo/chapitre/5?id=ch-abc',
+    );
+    expect(blPages.map((p) => p.imageUrl)).toEqual([
+      'https://cdn.blossom-demo.example/5/1.webp',
+      'https://cdn.blossom-demo.example/5/2.webp',
+    ]);
+
+    // Lelscan multi-page <option> crawling
+    const lelPages = await parserEngine.getChapterPages(lelscan, 'https://lel-demo.example/scan-demo/100');
+    expect(lelPages.map((p) => p.imageUrl)).toEqual([
+      'https://lel-demo.example/imgs/p1.png',
+      'https://lel-demo.example/imgs/p2.png',
+    ]);
+
+    // RimuScans nextjs-flight chapters & pages
+    const rimuChs = await parserEngine.getChapters(rimu, 'https://rimu-demo.example/manga/slime-demo');
+    expect(rimuChs).toHaveLength(1);
+    expect(rimuChs[0]?.url).toBe('https://rimu-demo.example/read/slime-demo/12');
+    const rimuPages = await parserEngine.getChapterPages(rimu, rimuChs[0]!.url);
+    expect(rimuPages.map((p) => p.imageUrl)).toEqual([
+      'https://rimu-demo.example/rimu/12/1.webp',
+      'https://rimu-demo.example/rimu/12/2.webp',
+    ]);
+
+    // Aniverse nextjs-flight reader pages
+    const aniPages = await parserEngine.getChapterPages(aniverse, 'https://ani-demo.example/read/hero-demo/ch99');
+    expect(aniPages.map((p) => p.imageUrl)).toEqual(['https://cdn.ani-demo.example/ch99/1.webp']);
+
+    // `:contains(...)` & `:has(...:containsOwn(...))` compat selectors in HTML catalogues/details
+    const dassou = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.dassouscan!(
+        { slug: 'dassouscan', id: 'dassouscan-fr', name: 'Dassou Scan', lang: 'fr', baseUrl: 'https://dassou-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+    const mtDetailsSource = resolveSourceWithTemplates(
+      { id: 'mt-contains-fr', name: 'MT Contains', lang: 'fr', extends: 'mangathemesia', baseUrl: 'https://mtc-demo.example' },
+      tplMap,
+    );
+    const containsFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.startsWith('https://dassou-demo.example/catalogue')) {
+        return new Response(
+          `<html>
+            <article class="dsc-cat-card">
+              <a class="dsc-cat-card__cover-link" href="/manga/demo-1"><img data-src="/c.jpg"/></a>
+              <div class="dsc-cat-card__title"><a href="/manga/demo-1">Demo One</a></div>
+            </article>
+            <a class="dsc-cat__pager-btn" href="/catalogue?page=2">Suivant →</a>
+          </html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://mtc-demo.example/manga/hero') {
+        return new Response(
+          `<html>
+            <h1 class="entry-title">Hero Title</h1>
+            <div class="fmed"><b>Author</b><span>Jane Author</span></div>
+            <div class="imptdt">Status <i>Ongoing</i></div>
+          </html>`,
+          { status: 200 },
+        );
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', containsFetch);
+    const dassouPage = await parserEngine.getPopular(dassou, 1);
+    expect(dassouPage.items).toHaveLength(1);
+    expect(dassouPage.hasNextPage).toBe(true);
+    const mtDetails = await parserEngine.getMangaDetails(mtDetailsSource, 'https://mtc-demo.example/manga/hero');
+    expect(mtDetails.author).toBe('Jane Author');
+    expect(mtDetails.status).toBe('ongoing');
+  });
+
+  it('supports langOverride and multi-source listOf gradle metadata in keiyoushiImporter', () => {
+    const enTarget = parseKeiyoushiRepoUrl('https://github.com/keiyoushi/extensions-source', 'en');
+    expect(enTarget?.langCode).toBe('en');
+    expect(enTarget?.langPath).toBe('src/en');
+
+    const explicitAll = parseKeiyoushiRepoUrl('https://github.com/keiyoushi/extensions-source/tree/main/src/all');
+    expect(explicitAll?.langCode).toBe('all');
+
+    const meta = parseKeiyoushiGradleBuild(
+      `
+      ext {
+        extName = 'Multi Demo'
+        extClass = '.MultiDemo'
+        extVersionCode = 1
+        isNsfw = true
+      }
+      baseUrl = "https://multi-demo.example"
+      lang = listOf("fr", "en")
+      `,
+      'multidemo',
+      'all',
+    );
+    expect(meta).not.toBeNull();
+    expect(meta?.lang).toBe('fr');
+    expect(meta?.nsfw).toBe(true);
+    expect(meta?.baseUrl).toBe('https://multi-demo.example');
+  });
 });

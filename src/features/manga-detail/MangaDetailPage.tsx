@@ -6,6 +6,7 @@ import {
   Check,
   CheckCheck,
   Download,
+  ExternalLink,
   Eye,
   EyeOff,
   HardDrive,
@@ -524,6 +525,17 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 )}
                 {t('manga.findOtherSources')}
               </button>
+              {activeLink?.sourceMangaUrl && (
+                <a
+                  href={activeLink.sourceMangaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="ky-btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {t('manga.openOnWebsite')}
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -753,6 +765,18 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                         )}
                       </button>
                     </>
+                  )}
+                  {chapter.sourceChapterUrl && (
+                    <a
+                      href={chapter.sourceChapterUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title={t('manga.openChapterOnWebsite')}
+                      className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-sky-300"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </a>
                   )}
                 </div>
               </div>

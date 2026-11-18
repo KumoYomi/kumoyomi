@@ -32,6 +32,7 @@ export interface KeiyoushiRepoTarget {
   repo: string;
   branch?: string;
   langPath: string;
+  langCode: string;
   canonicalRepoUrl: string;
   repoId: string;
 }
@@ -85,7 +86,10 @@ function slugifyId(name: string, lang: string): string {
  * Détecte si l'URL fournie pointe vers un dépôt GitHub de sources Keiyoushi/Tachiyomi.
  * Ne capture pas les dépôts JSON KumoYomi standards (qui pointent vers un `.json` ou un index).
  */
-export function parseKeiyoushiRepoUrl(rawInput: string): KeiyoushiRepoTarget | null {
+export function parseKeiyoushiRepoUrl(
+  rawInput: string,
+  langOverride?: string,
+): KeiyoushiRepoTarget | null {
   const trimmed = rawInput.trim();
   if (!trimmed) return null;
 
@@ -117,7 +121,7 @@ export function parseKeiyoushiRepoUrl(rawInput: string): KeiyoushiRepoTarget | n
   const looksLikeKeiyoushi =
     owner.toLowerCase() === 'keiyoushi' ||
     /extensions?-source|tachiyomi|mihon/i.test(repo) ||
-    joinedLower.includes('/src/fr');
+    /\/src\/[a-z-]+/i.test(joinedLower);
 
   if (!looksLikeKeiyoushi) return null;
 
@@ -128,10 +132,15 @@ export function parseKeiyoushiRepoUrl(rawInput: string): KeiyoushiRepoTarget | n
     branch = segments[3];
     const sub = segments.slice(4).join('/');
     if (sub && /^src\/[a-z-]+$/i.test(sub)) {
-      langPath = sub;
+      langPath = sub.toLowerCase();
     }
   }
 
+  if (langOverride && /^[a-z-]+$/i.test(langOverride.trim())) {
+    langPath = `src/${langOverride.trim().toLowerCase()}`;
+  }
+
+  const langCode = langPath.replace(/^src\//i, '') || 'fr';
   const canonicalRepoUrl = `https://github.com/${owner}/${repo}/tree/${branch ?? 'main'}/${langPath}`;
   const repoId = `repo_kei_${hashStableId(`${owner}/${repo}:${langPath}`.toLowerCase())}`;
 
@@ -140,6 +149,7 @@ export function parseKeiyoushiRepoUrl(rawInput: string): KeiyoushiRepoTarget | n
     repo,
     branch,
     langPath,
+    langCode,
     canonicalRepoUrl,
     repoId,
   };
@@ -198,7 +208,9 @@ export function parseKeiyoushiGradleBuild(
     preferredBlock?.lang ??
     extractFirstMatch(strippedBlocks, /\blang\s*=\s*["']([^"']+)["']/) ??
     extractFirstMatch(gradleText, /\bextLang\s*=\s*["']([^"']+)["']/) ??
-    targetLang;
+    (targetLang === 'all' && /listOf\([^)]*["']fr["']/.test(gradleText)
+      ? 'fr'
+      : targetLang);
 
   const baseUrlRaw =
     preferredBlock?.baseUrl ??
@@ -314,14 +326,14 @@ async function runWithConcurrency<T, R>(
 }
 
 /**
- * Récupère la liste des extensions françaises d'un dépôt Keiyoushi sans consommer de quota GitHub excessif :
- * 1 seul appel GitHub API pour lister `src/fr`, puis lecture parallèle des `build.gradle.kts` via raw.githubusercontent.com.
+ * Récupère la liste des extensions d'un dossier langue (`src/fr`, `src/en`, `src/all`, etc.) d'un dépôt Keiyoushi.
  */
-export async function scanKeiyoushiFrCatalog(
+export async function scanKeiyoushiCatalog(
   rawUrl: string,
   onProgress?: (done: number, total: number) => void,
+  langOverride?: string,
 ): Promise<KeiyoushiCatalogScanResult> {
-  const parsed = parseKeiyoushiRepoUrl(rawUrl);
+  const parsed = parseKeiyoushiRepoUrl(rawUrl, langOverride);
   if (!parsed) {
     throw new Error('URL GitHub Keiyoushi invalide.');
   }
@@ -355,7 +367,7 @@ export async function scanKeiyoushiFrCatalog(
     onProgress?.(doneCount, dirs.length);
 
     if (!gradleText) return null;
-    const meta = parseKeiyoushiGradleBuild(gradleText, dir.name, 'fr');
+    const meta = parseKeiyoushiGradleBuild(gradleText, dir.name, parsed.langCode);
     if (!meta) return null;
 
     const compat = classifyStaticCompatibility(meta);
@@ -393,11 +405,13 @@ export async function scanKeiyoushiFrCatalog(
   return {
     target,
     branch,
-    repoDisplayName: `Keiyoushi FR (${parsed.owner}/${parsed.repo})`,
+    repoDisplayName: `Keiyoushi ${parsed.langCode.toUpperCase()} (${parsed.owner}/${parsed.repo})`,
     entries,
     compatibleCount: entries.filter((e) => e.compatible).length,
   };
 }
+
+export const scanKeiyoushiFrCatalog = scanKeiyoushiCatalog;
 
 /**
  * Télécharge les fichiers `.kt` d'une extension Keiyoushi sélectionnée afin d'en extraire
@@ -408,7 +422,7 @@ async function fetchKotlinFilesForExtension(
   branch: string,
   slug: string,
 ): Promise<string> {
-  const pkgPath = `${target.langPath}/${slug}/src/eu/kanade/tachiyomi/extension/fr/${slug}`;
+  const pkgPath = `${target.langPath}/${slug}/src/eu/kanade/tachiyomi/extension/${target.langCode}/${slug}`;
   const apiBase = `https://api.github.com/repos/${target.owner}/${target.repo}/contents`;
 
   const tryFetchDir = async (dirPath: string): Promise<GitHubContentItem[] | null> => {
@@ -564,11 +578,15 @@ export async function importSelectedKeiyoushiSources(
     }
   });
 
+  const existingForRepo = existingSources.filter((s) => s.repoId === scan.target.repoId);
+  const unionIds = new Set(existingForRepo.map((s) => s.id));
+  for (const r of resolvedRecords) unionIds.add(r.id);
+
   const repoRecord: RepositoryRecord = {
     id: scan.target.repoId,
     name: scan.repoDisplayName,
     url: scan.target.canonicalRepoUrl,
-    description: `Mihon / Keiyoushi FR (${resolvedRecords.length} installées)`,
+    description: `Mihon / Keiyoushi ${scan.target.langCode.toUpperCase()} (${unionIds.size})`,
     version: scan.branch,
     lastFetchedAt: now,
   };
