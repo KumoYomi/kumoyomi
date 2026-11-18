@@ -16,6 +16,7 @@ import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { db, normalizeMangaKey } from '@/src/core/db/db';
 import { upsertMangaFromCatalogueItem } from '@/src/core/db/mangaRepository';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
+import { useTranslation } from '@/src/core/i18n';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import type { InstalledSourceRecord } from '@/src/core/types/manga';
@@ -44,6 +45,7 @@ interface GroupedSearchResult {
 }
 
 export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps) {
+  const { t } = useTranslation();
   const allSources = useLiveQuery(() => db.sources.toArray(), [], []) ?? [];
   const enabledSources = useMemo(() => allSources.filter((s) => s.enabled), [allSources]);
   const sourceById = useMemo(
@@ -266,17 +268,14 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
     return (
       <div className="rounded-2xl border border-dashed border-zinc-800 bg-[#111118] p-12 text-center">
         <FolderGit2 className="mx-auto h-10 w-10 text-zinc-600" />
-        <h2 className="mt-4 text-lg font-semibold text-white">Aucune source active</h2>
-        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
-          Commencez par ajouter un dépôt ou importer un fichier <code>.json</code> dans l’onglet
-          Sources & Dépôts pour explorer les catalogues.
-        </p>
+        <h2 className="mt-4 text-lg font-semibold text-white">{t('explore.noSourcesTitle')}</h2>
+        <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">{t('explore.noSourcesDesc')}</p>
         <button
           type="button"
           onClick={() => navigate({ name: 'sources' })}
           className="mt-5 inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-rose-500"
         >
-          Configurer mes sources
+          {t('explore.manageSources')}
         </button>
       </div>
     );
@@ -287,11 +286,8 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
       <header className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Explorer & Recherche</h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Recherche globale parallèle sur {enabledSources.length} source(s) active(s) avec
-              dédoublonnage automatique.
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight text-white">{t('explore.title')}</h1>
+            <p className="mt-1 text-sm text-zinc-400">{t('explore.subtitle')}</p>
           </div>
         </div>
 
@@ -309,7 +305,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                   setSearchStates({});
                 }
               }}
-              placeholder="Rechercher un titre sur toutes vos sources (ex: Solo Leveling, Kumo...)"
+              placeholder={t('explore.searchPlaceholder')}
               className="w-full rounded-xl border border-zinc-800 bg-[#12121a] py-3 pl-11 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-rose-500/60 focus:outline-none"
             />
           </div>
@@ -323,7 +319,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
             ) : (
               <Search className="h-4 w-4" />
             )}
-            Rechercher
+            {t('common.search')}
           </button>
           {activeQuery && (
             <button
@@ -335,7 +331,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
               }}
               className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
             >
-              Retour au catalogue
+              {t('common.clear')}
             </button>
           )}
         </form>
@@ -362,7 +358,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 <span>{st.source.name}</span>
                 {st.status === 'done' && <span>({st.items.length})</span>}
                 {st.status === 'cloudflare' && <span>(Cloudflare)</span>}
-                {st.status === 'error' && <span>(Erreur)</span>}
+                {st.status === 'error' && <span>({t('common.error')})</span>}
               </span>
             ))}
           </div>
@@ -416,7 +412,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                     {group.entries.length > 1 ? (
                       <span className="inline-flex items-center gap-1 rounded-md bg-rose-600/95 px-2 py-0.5 text-[11px] font-semibold text-white shadow">
                         <Layers className="h-3 w-3" />
-                        {group.entries.length} sources
+                        {t('explore.sourcesBadge', { count: group.entries.length })}
                       </span>
                     ) : (
                       <span className="rounded-md bg-zinc-950/85 px-2 py-0.5 text-[11px] font-medium text-zinc-200 backdrop-blur">
@@ -455,7 +451,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
 
           {!anySourceLoading && groupedSearchResults.length === 0 && (
             <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-10 text-center text-sm text-zinc-400">
-              Aucun résultat trouvé pour « {activeQuery} ».
+              {t('explore.noResults', { query: activeQuery })}
             </div>
           )}
         </section>
@@ -464,7 +460,9 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
           {/* Barre de sélection source & tri */}
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-800/80 bg-[#12121a] p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2 text-xs font-medium text-zinc-400">Catalogue :</span>
+              <span className="px-2 text-xs font-medium text-zinc-400">
+                {t('explore.catalogueLabel')}
+              </span>
               <select
                 value={activeBrowseSource?.id ?? ''}
                 onChange={(e) => setSelectedSourceId(e.target.value)}
@@ -489,7 +487,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 }`}
               >
                 <TrendingUp className="h-3.5 w-3.5" />
-                Populaires
+                {t('explore.popular')}
               </button>
               <button
                 type="button"
@@ -501,7 +499,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 }`}
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                Dernières sorties
+                {t('explore.latest')}
               </button>
             </div>
           </div>
@@ -568,7 +566,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
           {!browseLoading && !browseError && browseItems.length === 0 && (
             <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-10 text-center">
               <Compass className="mx-auto h-8 w-8 text-zinc-600" />
-              <p className="mt-2 text-sm text-zinc-400">Aucune série trouvée sur cette page.</p>
+              <p className="mt-2 text-sm text-zinc-400">{t('explore.emptyCatalogue')}</p>
             </div>
           )}
 
@@ -583,7 +581,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
               >
                 {browseLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Charger plus de séries
+                {t('explore.loadMore')}
               </button>
             </div>
           )}

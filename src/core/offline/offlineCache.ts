@@ -29,7 +29,7 @@ export async function downloadChapterOffline(
     chapter.sourceChapterUrl,
   );
   if (pages.length === 0) {
-    throw new Error('Aucune planche trouvée pour ce chapitre.');
+    throw new Error('No pages found for this chapter.');
   }
 
   onProgress?.({ chapterId: chapter.id, completedPages: 0, totalPages: pages.length });
@@ -39,7 +39,7 @@ export async function downloadChapterOffline(
 
   for (let i = 0; i < pages.length; i += 1) {
     if (signal?.aborted) {
-      throw new DOMException('Téléchargement annulé', 'AbortError');
+      throw new DOMException('Download aborted', 'AbortError');
     }
     const page = pages[i]!;
     const blob = await fetchImageBlob(page.imageUrl, source.baseUrl, 'normal');
@@ -103,10 +103,10 @@ export async function clearAllOfflineChapters(): Promise<void> {
 }
 
 export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} o`;
+  if (bytes < 1024) return `${bytes} B`;
   const kb = bytes / 1024;
-  if (kb < 1024) return `${kb.toFixed(0)} Ko`;
+  if (kb < 1024) return `${kb.toFixed(0)} KB`;
   const mb = kb / 1024;
-  if (mb < 1024) return `${mb.toFixed(1)} Mo`;
-  return `${(mb / 1024).toFixed(2)} Go`;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
 }

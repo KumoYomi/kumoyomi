@@ -6,21 +6,23 @@ import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { UpdateCheckStatusBanner } from '@/src/components/UpdateCheckStatusBanner';
 import { db } from '@/src/core/db/db';
 import type { UpdateCheckSummary } from '@/src/core/extension/browserBridge';
+import { INTL_LOCALE_TAG, useTranslation } from '@/src/core/i18n';
 import type { LibraryStatus, MangaEntity } from '@/src/core/types/manga';
 import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
 
 type LibrarySortKey = 'updated' | 'title' | 'unread' | 'added';
 
-const FILTER_TABS: Array<{ key: 'all' | LibraryStatus; label: string }> = [
-  { key: 'all', label: 'Tous' },
-  { key: 'reading', label: 'En lecture' },
-  { key: 'plan_to_read', label: 'À lire' },
-  { key: 'completed', label: 'Terminés' },
-  { key: 'on_hold', label: 'En pause' },
-  { key: 'dropped', label: 'Abandonnés' },
+const FILTER_KEYS: Array<'all' | LibraryStatus> = [
+  'all',
+  'reading',
+  'plan_to_read',
+  'completed',
+  'on_hold',
+  'dropped',
 ];
 
 export function LibraryPage() {
+  const { locale, t } = useTranslation();
   const favorites =
     useLiveQuery(
       () =>
@@ -67,7 +69,7 @@ export function LibraryPage() {
     });
 
     return [...filtered].sort((a, b) => {
-      if (sortBy === 'title') return a.title.localeCompare(b.title, 'fr');
+      if (sortBy === 'title') return a.title.localeCompare(b.title, INTL_LOCALE_TAG[locale]);
       if (sortBy === 'unread') {
         if (b.unreadCount !== a.unreadCount) return b.unreadCount - a.unreadCount;
         return b.updatedAt - a.updatedAt;
@@ -75,7 +77,7 @@ export function LibraryPage() {
       if (sortBy === 'added') return b.addedAt - a.addedAt;
       return b.updatedAt - a.updatedAt;
     });
-  }, [favorites, statusFilter, sourceFilter, sortBy, titleQuery]);
+  }, [favorites, statusFilter, sourceFilter, sortBy, titleQuery, locale]);
 
   async function handleQuickReadManga(manga: MangaEntity) {
     const sourceId = manga.preferredSourceId;
@@ -119,9 +121,9 @@ export function LibraryPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Ma Bibliothèque</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white">{t('library.title')}</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {favorites.length} série(s) suivie(s) localement dans votre navigateur.
+            {t('library.subtitle', { count: favorites.length })}
           </p>
         </div>
 
@@ -132,19 +134,19 @@ export function LibraryPage() {
               type="search"
               value={titleQuery}
               onChange={(e) => setTitleQuery(e.target.value)}
-              placeholder="Filtrer ma bibliothèque..."
+              placeholder={t('library.filterPlaceholder')}
               className="rounded-xl border border-zinc-800 bg-[#12121a] py-2 pl-9 pr-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
             />
           </div>
 
           {allSources.length > 1 && (
             <select
-              aria-label="Filtrer par source"
+              aria-label={t('library.filterSourceAria')}
               value={sourceFilter}
               onChange={(e) => setSourceFilter(e.target.value)}
               className="rounded-xl border border-zinc-800 bg-[#12121a] px-3 py-2 text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
             >
-              <option value="all">Toutes sources</option>
+              <option value="all">{t('library.allSources')}</option>
               {allSources.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -154,15 +156,15 @@ export function LibraryPage() {
           )}
 
           <select
-            aria-label="Trier la bibliothèque"
+            aria-label={t('library.sortAria')}
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as LibrarySortKey)}
             className="rounded-xl border border-zinc-800 bg-[#12121a] px-3 py-2 text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
           >
-            <option value="updated">Dernière mise à jour</option>
-            <option value="unread">Chapitres non lus</option>
-            <option value="title">Alphabétique (A→Z)</option>
-            <option value="added">Date d&apos;ajout</option>
+            <option value="updated">{t('library.sortUpdated')}</option>
+            <option value="unread">{t('library.sortUnread')}</option>
+            <option value="title">{t('library.sortTitle')}</option>
+            <option value="added">{t('library.sortAdded')}</option>
           </select>
 
           <button
@@ -176,28 +178,28 @@ export function LibraryPage() {
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Vérifier les sorties
+            {t('library.checkUpdates')}
           </button>
         </div>
       </header>
 
       {/* Onglets de statut */}
       <div className="flex flex-wrap gap-1.5 border-b border-zinc-800/80 pb-3">
-        {FILTER_TABS.map((tab) => {
-          const count = tabCounts[tab.key] ?? 0;
-          if (tab.key === 'dropped' && count === 0 && statusFilter !== 'dropped') return null;
+        {FILTER_KEYS.map((key) => {
+          const count = tabCounts[key] ?? 0;
+          if (key === 'dropped' && count === 0 && statusFilter !== 'dropped') return null;
           return (
             <button
-              key={tab.key}
+              key={key}
               type="button"
-              onClick={() => setStatusFilter(tab.key)}
+              onClick={() => setStatusFilter(key)}
               className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition ${
-                statusFilter === tab.key
+                statusFilter === key
                   ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
                   : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
             >
-              <span>{tab.label}</span>
+              <span>{t(`libStatus.${key}`)}</span>
               <span className="rounded bg-zinc-900/90 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400">
                 {count}
               </span>
@@ -216,18 +218,15 @@ export function LibraryPage() {
       {favorites.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-zinc-800 bg-[#111118] p-14 text-center">
           <BookMarked className="mx-auto h-11 w-11 text-zinc-600" />
-          <h2 className="mt-4 text-lg font-semibold text-white">Votre bibliothèque est vide</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">
-            Ajoutez d’abord une source dans <strong>Sources & Dépôts</strong>, puis explorez les
-            catalogues pour ajouter vos mangas favoris ici.
-          </p>
+          <h2 className="mt-4 text-lg font-semibold text-white">{t('library.emptyTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">{t('library.emptyDesc')}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <button
               type="button"
               onClick={() => navigate({ name: 'sources' })}
               className="rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-800"
             >
-              Configurer mes sources
+              {t('library.configureSources')}
             </button>
             <button
               type="button"
@@ -235,13 +234,13 @@ export function LibraryPage() {
               className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-rose-500"
             >
               <Compass className="h-4 w-4" />
-              Explorer les mangas
+              {t('library.exploreManga')}
             </button>
           </div>
         </div>
       ) : visibleMangas.length === 0 ? (
         <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-10 text-center text-sm text-zinc-400">
-          Aucune série ne correspond à vos filtres.
+          {t('library.noFilterMatch')}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
@@ -285,7 +284,7 @@ export function LibraryPage() {
                 </button>
                 <button
                   type="button"
-                  title="Reprendre la lecture"
+                  title={t('library.resumeTooltip')}
                   onClick={() => void handleQuickReadManga(manga)}
                   className="absolute bottom-14 right-2 rounded-xl bg-rose-600 p-2 text-white opacity-0 shadow-lg transition hover:bg-rose-500 group-hover:opacity-100"
                 >

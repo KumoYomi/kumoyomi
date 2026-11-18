@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 import type {
+  AppLocale,
   AppSettings,
   ChapterEntity,
   InstalledSourceRecord,
@@ -20,8 +21,21 @@ export interface CoverBlobCacheEntry {
   cachedAt: number;
 }
 
+export function detectBrowserLocale(): AppLocale {
+  try {
+    const lang = (typeof navigator !== 'undefined' ? navigator.language : 'en').toLowerCase();
+    if (lang.startsWith('fr')) return 'fr';
+    if (lang.startsWith('es')) return 'es';
+    if (lang.startsWith('zh')) return 'zh';
+  } catch {
+    // Fallback to English outside browser contexts
+  }
+  return 'en';
+}
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   id: 'default',
+  language: detectBrowserLocale(),
   readerMode: 'webtoon',
   readingDirection: 'ltr',
   pageFitMode: 'contain',

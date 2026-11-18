@@ -23,6 +23,7 @@ import {
   requestOriginPermission,
 } from '@/src/core/extension/browserBridge';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
+import { useTranslation } from '@/src/core/i18n';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import {
@@ -40,6 +41,7 @@ type TestResult =
   | { status: 'error'; message: string };
 
 export function SourcesPage() {
+  const { t } = useTranslation();
   const repositories = useLiveQuery(() => db.repositories.toArray(), [], []) ?? [];
   const sources = useLiveQuery(() => db.sources.toArray(), [], []) ?? [];
 
@@ -97,12 +99,16 @@ export function SourcesPage() {
       setRepoUrlInput('');
       setFeedback({
         kind: 'ok',
-        text: `Dépôt "${res.repo.name}" ajouté : ${res.sourcesCount} source(s) et ${res.templatesCount} modèle(s).`,
+        text: t('sources.repoAdded', {
+          name: res.repo.name,
+          sources: res.sourcesCount,
+          templates: res.templatesCount,
+        }),
       });
     } catch (err) {
       setFeedback({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'Erreur lors de l’ajout du dépôt.',
+        text: err instanceof Error ? err.message : t('sources.repoAddError'),
       });
     } finally {
       setAddingRepo(false);
@@ -117,12 +123,15 @@ export function SourcesPage() {
       const res = await addOrRefreshRepositoryByUrl(url);
       setFeedback({
         kind: 'ok',
-        text: `Dépôt "${res.repo.name}" actualisé (${res.sourcesCount} source(s)).`,
+        text: t('sources.repoRefreshed', {
+          name: res.repo.name,
+          sources: res.sourcesCount,
+        }),
       });
     } catch (err) {
       setFeedback({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'Impossible d’actualiser ce dépôt.',
+        text: err instanceof Error ? err.message : t('sources.repoRefreshError'),
       });
     } finally {
       setRefreshingRepoId(null);
@@ -163,7 +172,7 @@ export function SourcesPage() {
     } catch (err) {
       setFeedback({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'Erreur lors de l’import JSON.',
+        text: err instanceof Error ? err.message : t('sources.importError'),
       });
     }
   }
@@ -172,14 +181,14 @@ export function SourcesPage() {
     if (!pastedJson.trim()) return;
     setFeedback(null);
     try {
-      const res = await importLocalJsonConfig(pastedJson, 'JSON collé');
+      const res = await importLocalJsonConfig(pastedJson, 'JSON');
       setPastedJson('');
       setShowPasteModal(false);
       setFeedback({ kind: 'ok', text: res.message });
     } catch (err) {
       setFeedback({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'JSON invalide.',
+        text: err instanceof Error ? err.message : t('sources.invalidJson'),
       });
     }
   }
@@ -197,12 +206,15 @@ export function SourcesPage() {
       }
       setFeedback({
         kind: 'ok',
-        text: `${remoteRepos.length} dépôt(s) actualisé(s) (${updatedSources} source(s) synchronisée(s)).`,
+        text: t('sources.allReposRefreshed', {
+          repos: remoteRepos.length,
+          sources: updatedSources,
+        }),
       });
     } catch (err) {
       setFeedback({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'Erreur lors de la synchronisation.',
+        text: err instanceof Error ? err.message : t('sources.syncError'),
       });
     } finally {
       setRefreshingAll(false);
@@ -240,7 +252,7 @@ export function SourcesPage() {
           ...prev,
           [source.id]: {
             status: 'error',
-            message: err instanceof Error ? err.message : 'Erreur inconnue',
+            message: err instanceof Error ? err.message : t('common.unknown'),
           },
         }));
       }
@@ -256,18 +268,14 @@ export function SourcesPage() {
     <div className="space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Sources & Dépôts</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            KumoYomi est une coquille neutre : ajoutez un dépôt GitHub ou importez des fichiers{' '}
-            <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-200">.json</code>{' '}
-            pour activer vos sites de lecture.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-white">{t('sources.title')}</h1>
+          <p className="mt-1 text-sm text-zinc-400">{t('sources.subtitle')}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-xs font-semibold text-zinc-200 transition hover:border-zinc-600 hover:bg-zinc-800">
             <FileJson className="h-4 w-4 text-rose-400" />
-            Importer un JSON (.json)
+            {t('sources.importJson')}
             <input
               type="file"
               accept=".json,application/json"
@@ -282,7 +290,7 @@ export function SourcesPage() {
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900/70 px-4 py-2 text-xs font-medium text-zinc-300 transition hover:bg-zinc-800"
           >
             <Plus className="h-4 w-4" />
-            Coller du JSON
+            {t('sources.pasteJson')}
           </button>
         </div>
       </header>
@@ -303,14 +311,14 @@ export function SourcesPage() {
       <section className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
           <Link2 className="h-4 w-4 text-rose-400" />
-          Ajouter un dépôt GitHub ou une URL de manifeste
+          {t('sources.addRepoTitle')}
         </h2>
         <form onSubmit={(e) => void handleAddRepository(e)} className="mt-3 flex flex-wrap gap-3">
           <input
             type="url"
             value={repoUrlInput}
             onChange={(e) => setRepoUrlInput(e.target.value)}
-            placeholder="https://github.com/utilisateur/mon-depot-kumoyomi ou .../index.json"
+            placeholder={t('sources.repoPlaceholder')}
             className="min-w-[300px] flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
           />
           <button
@@ -323,33 +331,29 @@ export function SourcesPage() {
             ) : (
               <Plus className="h-4 w-4" />
             )}
-            Ajouter le dépôt
+            {t('sources.addRepoBtn')}
           </button>
         </form>
-        <p className="mt-2 text-xs text-zinc-500">
-          Astuce : vous pouvez aussi importer directement un manifeste autonome{' '}
-          <code className="text-zinc-300">.json</code> depuis votre disque via le bouton « Importer
-          un JSON ».
-        </p>
+        <p className="mt-2 text-xs text-zinc-500">{t('sources.localHint')}</p>
       </section>
 
       {showPasteModal && (
         <section className="rounded-2xl border border-zinc-700 bg-[#14141e] p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">Coller une configuration JSON</h3>
+            <h3 className="text-sm font-semibold text-white">{t('sources.pasteModalTitle')}</h3>
             <button
               type="button"
               onClick={() => setShowPasteModal(false)}
               className="text-xs text-zinc-400 hover:text-white"
             >
-              Fermer
+              {t('common.close')}
             </button>
           </div>
           <textarea
             rows={7}
             value={pastedJson}
             onChange={(e) => setPastedJson(e.target.value)}
-            placeholder='{ "id": "ma-source", "name": "...", "baseUrl": "https://...", "extends": "origines" }'
+            placeholder='{ "id": "my-source", "name": "...", "baseUrl": "https://...", "extends": "origines" }'
             className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
           />
           <div className="flex justify-end">
@@ -358,7 +362,7 @@ export function SourcesPage() {
               onClick={() => void handlePasteImport()}
               className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-500"
             >
-              Valider et importer
+              {t('sources.pasteValidate')}
             </button>
           </div>
         </section>
@@ -368,7 +372,7 @@ export function SourcesPage() {
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            Dépôts installés ({repositories.length})
+            {t('sources.reposSection', { count: repositories.length })}
           </h2>
           {repositories.some((r) => !r.url.startsWith('local://')) && (
             <button
@@ -378,17 +382,15 @@ export function SourcesPage() {
               className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshingAll ? 'animate-spin' : ''}`} />
-              Tout actualiser
+              {t('sources.refreshAll')}
             </button>
           )}
         </div>
         {repositories.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/50 p-8 text-center">
             <FolderGit2 className="mx-auto h-9 w-9 text-zinc-600" />
-            <p className="mt-3 text-sm font-medium text-zinc-300">Aucun dépôt installé</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Ajoutez une URL de dépôt ou importez un fichier <code>.json</code> ci-dessus.
-            </p>
+            <p className="mt-3 text-sm font-medium text-zinc-300">{t('sources.noReposTitle')}</p>
+            <p className="mt-1 text-xs text-zinc-500">{t('sources.noReposDesc')}</p>
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -416,7 +418,7 @@ export function SourcesPage() {
                   {!repo.url.startsWith('local://') && (
                     <button
                       type="button"
-                      title="Actualiser"
+                      title={t('common.refresh')}
                       onClick={() => void handleRefreshRepo(repo.id, repo.url)}
                       disabled={refreshingRepoId === repo.id}
                       className="rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
@@ -428,7 +430,7 @@ export function SourcesPage() {
                   )}
                   <button
                     type="button"
-                    title="Supprimer ce dépôt"
+                    title={t('sources.deleteRepo')}
                     onClick={() => void removeRepository(repo.id)}
                     className="rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-zinc-400 hover:border-rose-500/40 hover:text-rose-400"
                   >
@@ -445,8 +447,12 @@ export function SourcesPage() {
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            Sources disponibles ({visibleSources.length}
-            {visibleSources.length !== sources.length ? ` / ${sources.length}` : ''})
+            {visibleSources.length !== sources.length
+              ? t('sources.sourcesFiltered', {
+                  shown: visibleSources.length,
+                  total: sources.length,
+                })
+              : t('sources.sourcesSection', { shown: visibleSources.length })}
           </h2>
 
           {sources.length > 0 && (
@@ -457,7 +463,7 @@ export function SourcesPage() {
                   type="search"
                   value={sourceQuery}
                   onChange={(e) => setSourceQuery(e.target.value)}
-                  placeholder="Filtrer les sources..."
+                  placeholder={t('sources.filterSources')}
                   className="rounded-xl border border-zinc-800 bg-[#12121a] py-1.5 pl-8 pr-3 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
                 />
               </div>
@@ -470,7 +476,7 @@ export function SourcesPage() {
                       langFilter === 'all' ? 'bg-rose-600 text-white' : 'text-zinc-400'
                     }`}
                   >
-                    Toutes
+                    {t('common.all')}
                   </button>
                   {availableLangs.map((lang) => (
                     <button
@@ -509,20 +515,20 @@ export function SourcesPage() {
                       </span>
                       {source.extendsId && (
                         <span className="rounded-md bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-300">
-                          modèle : {source.extendsId}
+                          {t('sources.templateBadge', { id: source.extendsId })}
                         </span>
                       )}
                       {cfUnlocked && (
                         <button
                           type="button"
-                          title="Session Cloudflare active via onglet — cliquer pour réinitialiser"
+                          title={t('sources.cfSessionTitle')}
                           onClick={() => {
                             clearSiteTabProxied(source.baseUrl);
                             setSessionNonce((n) => n + 1);
                           }}
                           className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/25"
                         >
-                          Session CF active
+                          {t('sources.cfSessionActive')}
                         </button>
                       )}
                       {!hasPerm && (
@@ -532,7 +538,7 @@ export function SourcesPage() {
                           className="inline-flex items-center gap-1 rounded-md bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-300 hover:bg-amber-500/25"
                         >
                           <ShieldCheck className="h-3 w-3" />
-                          Autoriser l’accès
+                          {t('sources.allowAccess')}
                         </button>
                       )}
                     </div>
@@ -551,7 +557,7 @@ export function SourcesPage() {
                       ) : (
                         <RefreshCw className="h-3.5 w-3.5" />
                       )}
-                      Tester
+                      {t('sources.testBtn')}
                     </button>
 
                     <button
@@ -561,7 +567,7 @@ export function SourcesPage() {
                       className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-40"
                     >
                       <Compass className="h-3.5 w-3.5 text-rose-400" />
-                      Explorer
+                      {t('sources.exploreBtn')}
                     </button>
 
                     <button
@@ -573,7 +579,7 @@ export function SourcesPage() {
                           : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
                       }`}
                     >
-                      {source.enabled ? 'Active' : 'Désactivée'}
+                      {source.enabled ? t('sources.enabled') : t('sources.disabled')}
                     </button>
                   </div>
                 </div>
@@ -582,8 +588,8 @@ export function SourcesPage() {
                   <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">
                     <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
                     <span>
-                      Connexion OK — {test.count} manga(s) extraits
-                      {test.sampleTitle ? ` (ex: "${test.sampleTitle}")` : ''}.
+                      {t('sources.testOk', { count: test.count })}
+                      {test.sampleTitle ? t('sources.testSample', { title: test.sampleTitle }) : ''}.
                     </span>
                   </div>
                 )}
@@ -600,7 +606,7 @@ export function SourcesPage() {
 
                 {test?.status === 'error' && (
                   <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-                    Échec du test : {test.message}
+                    {t('sources.testFail', { message: test.message })}
                   </div>
                 )}
               </div>

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(__dirname, '..', 'tests', 'fixtures');
+const ENFORCE_HOTLINK = !process.argv.includes('--no-hotlink');
 
 function readFixtureJson(fileName) {
   return JSON.parse(readFileSync(resolve(FIXTURES_DIR, fileName), 'utf8'));
@@ -172,7 +173,7 @@ const originesServer = createServer(async (req, res) => {
 
   if (path.startsWith('/images/')) {
     const referer = req.headers.referer ?? '';
-    if (!referer.startsWith('http://127.0.0.1:4179/')) {
+    if (ENFORCE_HOTLINK && !referer.startsWith('http://127.0.0.1:4179/')) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('403 Hotlink Blocked: valid Referer http://127.0.0.1:4179/ required');
       return;
@@ -298,7 +299,7 @@ const madaraServer = createServer(async (req, res) => {
 
   if (path.startsWith('/images/')) {
     const referer = req.headers.referer ?? '';
-    if (!referer.startsWith('http://127.0.0.1:4180/')) {
+    if (ENFORCE_HOTLINK && !referer.startsWith('http://127.0.0.1:4180/')) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('403 Hotlink Blocked: valid Referer http://127.0.0.1:4180/ required');
       return;

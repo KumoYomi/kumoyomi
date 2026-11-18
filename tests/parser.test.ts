@@ -4,6 +4,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { db, normalizeMangaKey } from '@/src/core/db/db';
+import { LOCALE_OPTIONS, translate } from '@/src/core/i18n';
+import { en } from '@/src/core/i18n/locales/en';
+import { es } from '@/src/core/i18n/locales/es';
+import { fr } from '@/src/core/i18n/locales/fr';
+import { zh } from '@/src/core/i18n/locales/zh';
+import type { TranslationKey } from '@/src/core/i18n/types';
 import { formatBytes } from '@/src/core/offline/offlineCache';
 import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
@@ -797,9 +803,9 @@ describe('KumoYomi Universal Parser & Templates', () => {
   });
 
   it('lit une planche hors-ligne depuis IndexedDB sans requête réseau et formate les tailles', async () => {
-    expect(formatBytes(512)).toBe('512 o');
-    expect(formatBytes(2048)).toBe('2 Ko');
-    expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 Mo');
+    expect(formatBytes(512)).toBe('512 B');
+    expect(formatBytes(2048)).toBe('2 KB');
+    expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 MB');
 
     const createObjectUrlSpy = vi
       .spyOn(URL, 'createObjectURL')
@@ -832,5 +838,19 @@ describe('KumoYomi Universal Parser & Templates', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
 
     revokeScopeBlobUrls('reader-offline-test');
+  });
+
+  it('couvre toutes les clés i18n dans les 4 langues (en, fr, es, zh) avec interpolation', () => {
+    const keys = Object.keys(en) as TranslationKey[];
+    expect(LOCALE_OPTIONS.map((o) => o.value)).toEqual(['en', 'fr', 'es', 'zh']);
+    for (const dict of [en, fr, es, zh]) {
+      for (const k of keys) {
+        expect(typeof dict[k]).toBe('string');
+        expect(dict[k].trim().length).toBeGreaterThan(0);
+      }
+    }
+    expect(translate('en', 'library.subtitle', { count: 4 })).toContain('4');
+    expect(translate('zh', 'library.subtitle', { count: 4 })).toContain('4');
+    expect(translate('es', 'library.subtitle', { count: 4 })).toContain('4');
   });
 });

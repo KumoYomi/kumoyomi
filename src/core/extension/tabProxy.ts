@@ -209,7 +209,7 @@ async function inPageFetchExecutor(params: {
     return {
       foundTab: true,
       ok: false,
-      error: err instanceof Error ? err.message : 'Erreur réseau depuis onglet',
+      error: err instanceof Error ? err.message : 'Network error from open tab',
     };
   } finally {
     clearTimeout(timer);

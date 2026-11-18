@@ -44,7 +44,7 @@ export function normalizeRepositoryInputUrl(inputUrl: string): string {
 async function fetchJsonResource<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Impossible de télécharger ${url} (HTTP ${response.status}).`);
+    throw new Error(`Unable to download ${url} (HTTP ${response.status}).`);
   }
   return (await response.json()) as T;
 }
@@ -161,7 +161,7 @@ export async function importLocalJsonConfig(
 ): Promise<{ message: string }> {
   const parsed: unknown = JSON.parse(rawJsonText);
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Le fichier JSON doit contenir un objet valide.');
+    throw new Error('The JSON file must contain a valid object.');
   }
 
   const obj = parsed as Record<string, unknown>;
@@ -183,7 +183,7 @@ export async function importLocalJsonConfig(
     for (const entry of manifest.templates ?? []) {
       if (typeof entry === 'string') {
         throw new Error(
-          `Import local : le modèle "${entry}" est un chemin relatif externe ; utilisez un fichier index.json autonome ou importez le modèle séparément.`,
+          `Local import: template "${entry}" is an external relative path; use a self-contained index.json or import the template file separately.`,
         );
       }
       const tpl = validateTemplateConfig(entry);
@@ -195,7 +195,7 @@ export async function importLocalJsonConfig(
     for (const entry of manifest.sources) {
       if (typeof entry === 'string') {
         throw new Error(
-          `Import local : la source "${entry}" est un chemin relatif externe ; ajoutez le dépôt par URL ou importez les fichiers directement.`,
+          `Local import: source "${entry}" is an external relative path; add the repository by URL or import the source files directly.`,
         );
       }
       const rawSrc = validateRawSourceConfig(entry);
@@ -229,7 +229,7 @@ export async function importLocalJsonConfig(
 
     await syncAllSourceRulesToBackground();
     return {
-      message: `${sourcesAdded.length} source(s) et ${templatesAdded.length} modèle(s) importés depuis "${manifest.name}".`,
+      message: `${sourcesAdded.length} source(s) and ${templatesAdded.length} template(s) imported from "${manifest.name}".`,
     };
   }
 
@@ -243,7 +243,7 @@ export async function importLocalJsonConfig(
       if (!localRepo) {
         await db.repositories.put({
           id: localRepoId,
-          name: 'Sources importées manuellement',
+          name: 'Manually imported sources',
           url: 'local://manual',
           lastFetchedAt: now,
         });
@@ -263,7 +263,7 @@ export async function importLocalJsonConfig(
     });
 
     await syncAllSourceRulesToBackground();
-    return { message: `Source "${resolved.name}" importée avec succès.` };
+    return { message: `Source "${resolved.name}" imported successfully.` };
   }
 
   // Cas 3 : Modèle seul (_templates/*.json)
@@ -274,17 +274,33 @@ export async function importLocalJsonConfig(
     config: tpl,
     updatedAt: now,
   });
-  return { message: `Modèle "${tpl.id}" importé avec succès.` };
+  return { message: `Template "${tpl.id}" imported successfully.` };
 }
 
 export async function removeRepository(repoId: string): Promise<void> {
-  await db.transaction('rw', [db.repositories, db.templates, db.sources], async () => {
-    await db.repositories.delete(repoId);
-    const tIds = await db.templates.where('repoId').equals(repoId).primaryKeys();
-    if (tIds.length) await db.templates.bulkDelete(tIds);
-    const sIds = await db.sources.where('repoId').equals(repoId).primaryKeys();
-    if (sIds.length) await db.sources.bulkDelete(sIds);
-  });
+  await db.transaction(
+    'rw',
+    [db.repositories, db.templates, db.sources, db.offlineChapters, db.chapterPageBlobs],
+    async () => {
+      await db.repositories.delete(repoId);
+      const tIds = await db.templates.where('repoId').equals(repoId).primaryKeys();
+      if (tIds.length) await db.templates.bulkDelete(tIds);
+      const sIds = await db.sources.where('repoId').equals(repoId).primaryKeys();
+      if (sIds.length) {
+        await db.sources.bulkDelete(sIds);
+        for (const sourceId of sIds) {
+          const cachedChapters = await db.offlineChapters
+            .where('sourceId')
+            .equals(sourceId)
+            .primaryKeys();
+          for (const chapterId of cachedChapters) {
+            await db.chapterPageBlobs.where('chapterId').equals(chapterId).delete();
+            await db.offlineChapters.delete(chapterId);
+          }
+        }
+      }
+    },
+  );
   await syncAllSourceRulesToBackground();
 }
 

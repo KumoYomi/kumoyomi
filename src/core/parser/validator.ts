@@ -14,7 +14,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function assertNonEmptyString(value: unknown, fieldPath: string): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new Error(`Champ requis manquant ou invalide : "${fieldPath}"`);
+    throw new Error(`Missing or invalid required field: "${fieldPath}"`);
   }
   return value.trim();
 }
@@ -24,17 +24,17 @@ export function validateHttpUrl(rawUrl: string, label = 'URL'): string {
   try {
     parsed = new URL(rawUrl.trim());
   } catch {
-    throw new Error(`${label} invalide : "${rawUrl}"`);
+    throw new Error(`Invalid ${label}: "${rawUrl}"`);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`${label} doit utiliser http:// ou https://`);
+    throw new Error(`${label} must use http:// or https://`);
   }
   return parsed.toString().replace(/\/+$/, '');
 }
 
 export function validateTemplateConfig(raw: unknown): SourceTemplateConfig {
   if (!isRecord(raw)) {
-    throw new Error('Modèle de source invalide (objet attendu).');
+    throw new Error('Invalid source template (JSON object expected).');
   }
   const id = assertNonEmptyString(raw.id, 'template.id');
   return {
@@ -45,7 +45,7 @@ export function validateTemplateConfig(raw: unknown): SourceTemplateConfig {
 
 export function validateRawSourceConfig(raw: unknown): RawSourceConfig {
   if (!isRecord(raw)) {
-    throw new Error('Configuration source invalide (objet attendu).');
+    throw new Error('Invalid source configuration (JSON object expected).');
   }
   const id = assertNonEmptyString(raw.id, 'source.id');
   const name = assertNonEmptyString(raw.name, 'source.name');
@@ -63,11 +63,11 @@ export function validateRawSourceConfig(raw: unknown): RawSourceConfig {
 
 export function validateRepositoryManifest(raw: unknown): RepositoryManifest {
   if (!isRecord(raw)) {
-    throw new Error('Manifeste de dépôt invalide (objet JSON attendu).');
+    throw new Error('Invalid repository manifest (JSON object expected).');
   }
   const name = assertNonEmptyString(raw.name, 'manifest.name');
   if (!Array.isArray(raw.sources)) {
-    throw new Error('Manifeste invalide : "sources" doit être un tableau.');
+    throw new Error('Invalid manifest: "sources" must be an array.');
   }
 
   return {
@@ -85,14 +85,14 @@ function mergeDetailsConfig(
 ): MangaDetailsConfig {
   const request = override?.request ?? base?.request;
   if (!request) {
-    throw new Error('Configuration "mangaDetails.request" manquante.');
+    throw new Error('Missing "mangaDetails.request" configuration.');
   }
   const fields = {
     ...(base?.fields ?? {}),
     ...(override?.fields ?? {}),
   } as MangaDetailsConfig['fields'];
   if (!fields.title) {
-    throw new Error('Sélecteur "mangaDetails.fields.title" manquant.');
+    throw new Error('Missing "mangaDetails.fields.title" selector.');
   }
   return {
     request,
@@ -113,7 +113,7 @@ function mergeChaptersConfig(
     ...(override?.fields ?? {}),
   } as ChaptersEndpointConfig['fields'];
   if (!fields.title || !fields.url) {
-    throw new Error('Sélecteurs "chapters.fields.title" ou "url" manquants.');
+    throw new Error('Missing "chapters.fields.title" or "url" selector.');
   }
   return {
     request: override?.request ?? base?.request,
@@ -134,7 +134,7 @@ function mergePagesConfig(
   const numberedPages = override?.numberedPages ?? base?.numberedPages;
   if (!request || (!imageUrl && !numberedPages)) {
     throw new Error(
-      'Configuration "pages.request" ou "pages.imageUrl" / "pages.numberedPages" manquante.',
+      'Missing "pages.request" or "pages.imageUrl" / "pages.numberedPages" configuration.',
     );
   }
   return {
@@ -154,7 +154,7 @@ export function resolveSourceWithTemplates(
   const template = validatedRaw.extends ? templates.get(validatedRaw.extends) : undefined;
   if (validatedRaw.extends && !template) {
     throw new Error(
-      `La source "${validatedRaw.name}" hérite du modèle "${validatedRaw.extends}" qui est introuvable.`,
+      `Source "${validatedRaw.name}" extends template "${validatedRaw.extends}" which could not be found.`,
     );
   }
 

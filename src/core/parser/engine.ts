@@ -397,7 +397,7 @@ export class UniversalParserEngine {
   getPopular(source: SourceConfig, page = 1): Promise<ParsedCataloguePage> {
     const endpoint = source.popular ?? source.latest;
     if (!endpoint) {
-      throw new Error(`La source "${source.name}" ne définit pas de catalogue populaire.`);
+      throw new Error(`Source "${source.name}" does not define a popular catalogue.`);
     }
     return this.getCatalogue(source, endpoint, { page });
   }
@@ -405,7 +405,7 @@ export class UniversalParserEngine {
   getLatest(source: SourceConfig, page = 1): Promise<ParsedCataloguePage> {
     const endpoint = source.latest ?? source.popular;
     if (!endpoint) {
-      throw new Error(`La source "${source.name}" ne définit pas de dernières sorties.`);
+      throw new Error(`Source "${source.name}" does not define a latest releases catalogue.`);
     }
     return this.getCatalogue(source, endpoint, { page });
   }
@@ -413,7 +413,7 @@ export class UniversalParserEngine {
   search(source: SourceConfig, query: string, page = 1): Promise<ParsedCataloguePage> {
     const endpoint = source.search;
     if (!endpoint) {
-      throw new Error(`La source "${source.name}" ne supporte pas la recherche.`);
+      throw new Error(`Source "${source.name}" does not support search.`);
     }
     return this.getCatalogue(source, endpoint, { page, query });
   }

@@ -14,6 +14,8 @@ import {
 import { type ReactNode, useEffect, useState } from 'react';
 import { type AppRoute, buildHashUrl, navigate } from '@/src/app/router';
 import { db } from '@/src/core/db/db';
+import { LOCALE_OPTIONS, useTranslation } from '@/src/core/i18n';
+import type { AppLocale } from '@/src/core/types/manga';
 
 const SIDEBAR_COLLAPSE_KEY = 'kumoyomi:sidebar_collapsed';
 
@@ -26,10 +28,10 @@ function readExtensionVersion(): string {
     return (
       g.browser?.runtime?.getManifest?.().version ??
       g.chrome?.runtime?.getManifest?.().version ??
-      '0.2.0'
+      '0.3.0'
     );
   } catch {
-    return '0.2.0';
+    return '0.3.0';
   }
 }
 
@@ -39,6 +41,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ route, children }: AppShellProps) {
+  const { locale, t, formatTime, setLocale } = useTranslation();
   const favoritesCount =
     useLiveQuery(() => db.mangas.filter((m) => m.favorite).count(), [], 0) ?? 0;
   const newChaptersCount =
@@ -100,34 +103,34 @@ export function AppShell({ route, children }: AppShellProps) {
   }> = [
     {
       key: 'library',
-      label: 'Bibliothèque',
+      label: t('nav.library'),
       icon: BookMarked,
       badge: favoritesCount > 0 ? favoritesCount : undefined,
       href: buildHashUrl({ name: 'library' }),
     },
     {
       key: 'updates',
-      label: 'Nouveautés',
+      label: t('nav.updates'),
       icon: Bell,
       badge: newChaptersCount > 0 ? newChaptersCount : undefined,
       href: buildHashUrl({ name: 'updates' }),
     },
     {
       key: 'explore',
-      label: 'Explorer',
+      label: t('nav.explore'),
       icon: Compass,
       href: buildHashUrl({ name: 'explore' }),
     },
     {
       key: 'sources',
-      label: 'Sources & Dépôts',
+      label: t('nav.sources'),
       icon: FolderGit2,
       badge: enabledSourcesCount > 0 ? enabledSourcesCount : undefined,
       href: buildHashUrl({ name: 'sources' }),
     },
     {
       key: 'settings',
-      label: 'Paramètres',
+      label: t('nav.settings'),
       icon: Settings,
       href: buildHashUrl({ name: 'settings' }),
     },
@@ -153,10 +156,10 @@ export function AppShell({ route, children }: AppShellProps) {
               <div className="flex items-center gap-2">
                 <span className="text-base font-bold tracking-tight text-white">KumoYomi</span>
                 <span className="rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-rose-400">
-                  Local
+                  {t('shell.localBadge')}
                 </span>
               </div>
-              <p className="truncate text-xs text-zinc-500">Agrégateur & Lecteur</p>
+              <p className="truncate text-xs text-zinc-500">{t('shell.subtitle')}</p>
             </div>
           )}
         </div>
@@ -166,7 +169,7 @@ export function AppShell({ route, children }: AppShellProps) {
             type="button"
             onClick={() => setMobileMenuOpen(false)}
             className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-            aria-label="Fermer le menu"
+            aria-label={t('shell.closeMenu')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -174,7 +177,7 @@ export function AppShell({ route, children }: AppShellProps) {
           <button
             type="button"
             onClick={toggleCollapsed}
-            title={collapsed ? 'Déplier la barre latérale' : 'Réduire la barre latérale'}
+            title={collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')}
             className="hidden rounded-lg p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 lg:inline-flex"
           >
             {collapsed ? (
@@ -195,14 +198,14 @@ export function AppShell({ route, children }: AppShellProps) {
               document.getElementById('global-search-input')?.focus();
             });
           }}
-          title="Rechercher un manga (Ctrl K)"
+          title={t('shell.searchTooltip')}
           className={`flex w-full items-center rounded-xl border border-zinc-800 bg-zinc-900/70 py-2 text-xs text-zinc-400 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200 ${
             collapsed && !isMobileDrawer ? 'justify-center px-2' : 'justify-between px-3'
           }`}
         >
           <span className="flex items-center gap-2">
             <Search className="h-3.5 w-3.5 text-zinc-500" />
-            {(!collapsed || isMobileDrawer) && 'Rechercher un manga...'}
+            {(!collapsed || isMobileDrawer) && t('shell.searchPlaceholder')}
           </span>
           {(!collapsed || isMobileDrawer) && (
             <kbd className="rounded border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
@@ -256,24 +259,36 @@ export function AppShell({ route, children }: AppShellProps) {
       </nav>
 
       {(!collapsed || isMobileDrawer) && (
-        <div className="border-t border-zinc-800/70 p-4 text-xs text-zinc-500">
+        <div className="space-y-2 border-t border-zinc-800/70 p-4 text-xs text-zinc-500">
           <div className="flex items-center justify-between">
-            <span>Sources actives</span>
+            <span>{t('shell.activeSources')}</span>
             <span className="font-semibold text-zinc-300">{enabledSourcesCount}</span>
           </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span>Dernière vérif.</span>
+          <div className="flex items-center justify-between">
+            <span>{t('shell.lastCheck')}</span>
             <span className="text-zinc-400">
               {settings?.lastGlobalUpdateCheck
-                ? new Date(settings.lastGlobalUpdateCheck).toLocaleTimeString('fr-FR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : 'Jamais'}
+                ? formatTime(settings.lastGlobalUpdateCheck)
+                : t('shell.never')}
             </span>
           </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span>Version</span>
+          <div className="flex items-center justify-between pt-1">
+            <span>{t('shell.languageLabel')}</span>
+            <select
+              aria-label={t('settings.languageLabel')}
+              value={locale}
+              onChange={(e) => void setLocale(e.target.value as AppLocale)}
+              className="rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-zinc-200 focus:border-rose-500 focus:outline-none"
+            >
+              {LOCALE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.nativeLabel}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>{t('shell.version')}</span>
             <span className="font-mono text-[11px] text-zinc-400">v{extVersion}</span>
           </div>
         </div>
@@ -290,7 +305,7 @@ export function AppShell({ route, children }: AppShellProps) {
             type="button"
             onClick={() => setMobileMenuOpen(true)}
             className="rounded-lg border border-zinc-800 bg-zinc-900 p-2 text-zinc-200 hover:bg-zinc-800"
-            aria-label="Ouvrir la navigation"
+            aria-label={t('shell.openMenu')}
           >
             <Menu className="h-4 w-4" />
           </button>
@@ -303,7 +318,7 @@ export function AppShell({ route, children }: AppShellProps) {
             onClick={() => navigate({ name: 'updates' })}
             className="rounded-full bg-rose-600 px-2.5 py-0.5 text-xs font-semibold text-white"
           >
-            {newChaptersCount} nouveau(x)
+            {t('shell.newCount', { count: newChaptersCount })}
           </button>
         )}
       </header>

@@ -9,9 +9,11 @@ import {
   sendBackgroundMessage,
   type UpdateCheckSummary,
 } from '@/src/core/extension/browserBridge';
+import { useTranslation } from '@/src/core/i18n';
 import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
 
 export function UpdatesPage() {
+  const { t, formatDate } = useTranslation();
   const [showAllHistory, setShowAllHistory] = useState(false);
   const [showAllNew, setShowAllNew] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -73,10 +75,8 @@ export function UpdatesPage() {
     <div className="space-y-9">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Nouveautés & Historique</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Reprenez instantanément votre lecture et suivez les derniers chapitres détectés.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-white">{t('updates.title')}</h1>
+          <p className="mt-1 text-sm text-zinc-400">{t('updates.subtitle')}</p>
         </div>
 
         <button
@@ -90,7 +90,7 @@ export function UpdatesPage() {
           ) : (
             <RefreshCw className="h-4 w-4" />
           )}
-          Vérifier les sorties
+          {t('library.checkUpdates')}
         </button>
       </header>
 
@@ -106,7 +106,7 @@ export function UpdatesPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
             <Clock className="h-4 w-4 text-rose-400" />
-            Reprendre la lecture
+            {t('updates.resumeSection')}
           </div>
           {historyEntries.length > 0 && (
             <div className="flex items-center gap-2">
@@ -116,7 +116,7 @@ export function UpdatesPage() {
                   onClick={() => setShowAllHistory((v) => !v)}
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
                 >
-                  {showAllHistory ? 'Réduire' : 'Tout afficher'}
+                  {showAllHistory ? t('updates.collapse') : t('updates.showAll')}
                 </button>
               )}
               <button
@@ -125,7 +125,7 @@ export function UpdatesPage() {
                 className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:border-rose-500/40 hover:text-rose-300"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                Effacer l&apos;historique
+                {t('updates.clearHistory')}
               </button>
             </div>
           )}
@@ -133,7 +133,7 @@ export function UpdatesPage() {
 
         {historyEntries.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-8 text-center text-sm text-zinc-500">
-            Aucun historique de lecture enregistré pour le moment.
+            {t('updates.emptyHistory')}
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -167,12 +167,9 @@ export function UpdatesPage() {
                     </button>
                     <p className="truncate text-xs text-zinc-400">{entry.chapterTitle}</p>
                     <p className="mt-1 text-[11px] text-zinc-500">
-                      Page {entry.pageIndex + 1}
+                      {t('updates.pageProgress', { page: entry.pageIndex + 1 })}
                       {entry.totalPages > 0 ? ` / ${entry.totalPages}` : ''} ·{' '}
-                      {new Date(entry.readAt).toLocaleDateString('fr-FR', {
-                        day: 'numeric',
-                        month: 'short',
-                      })}
+                      {formatDate(entry.readAt)}
                     </p>
                   </div>
 
@@ -186,7 +183,7 @@ export function UpdatesPage() {
                       })
                     }
                     className="shrink-0 rounded-xl bg-rose-600 p-2.5 text-white transition hover:bg-rose-500"
-                    title="Reprendre"
+                    title={t('updates.resumeBtn')}
                   >
                     <Play className="h-4 w-4 fill-current" />
                   </button>
@@ -202,7 +199,7 @@ export function UpdatesPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
             <Bell className="h-4 w-4 text-rose-400" />
-            Nouveaux chapitres ({newChapters.length})
+            {t('updates.newChaptersSection', { count: newChapters.length })}
           </div>
           {newChapters.length > 0 && (
             <div className="flex items-center gap-2">
@@ -212,7 +209,7 @@ export function UpdatesPage() {
                   onClick={() => setShowAllNew((v) => !v)}
                   className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
                 >
-                  {showAllNew ? 'Réduire' : 'Tout afficher'}
+                  {showAllNew ? t('updates.collapse') : t('updates.showAll')}
                 </button>
               )}
               <button
@@ -221,7 +218,7 @@ export function UpdatesPage() {
                 className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
               >
                 <CheckCheck className="h-3.5 w-3.5 text-rose-400" />
-                Tout marquer comme vu
+                {t('updates.markAllSeen')}
               </button>
             </div>
           )}
@@ -229,8 +226,7 @@ export function UpdatesPage() {
 
         {newChapters.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-8 text-center text-sm text-zinc-500">
-            Aucun nouveau chapitre en attente. Cliquez sur « Vérifier les sorties » dans votre
-            Bibliothèque.
+            {t('updates.emptyNew')}
           </div>
         ) : (
           <div className="divide-y divide-zinc-800/70 overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#12121a]">
@@ -257,7 +253,7 @@ export function UpdatesPage() {
                         onClick={() => navigate({ name: 'manga', mangaId: ch.mangaId })}
                         className="block truncate text-left text-sm font-semibold text-white hover:text-rose-300"
                       >
-                        {m?.title ?? 'Série'}
+                        {m?.title ?? t('common.series')}
                       </button>
                       <p className="truncate text-xs text-zinc-400">
                         {ch.title} {s ? `· ${s.name}` : ''}
@@ -272,7 +268,7 @@ export function UpdatesPage() {
                     }
                     className="shrink-0 rounded-xl bg-rose-600/90 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-500"
                   >
-                    Lire
+                    {t('common.read')}
                   </button>
                 </div>
               );

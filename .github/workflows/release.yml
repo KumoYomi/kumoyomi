@@ -100,12 +100,12 @@ jobs:
           cat << 'EOF' > /tmp/release-notes.md
           ## KumoYomi ${{ steps.meta.outputs.tag }}
 
-          ### Installation rapide
-          - **Chrome / Brave / Edge :** téléchargez l'archive `*-chrome.zip`, décompressez-la, ouvrez `chrome://extensions`, activez le **Mode développeur** et cliquez sur **Charger l'extension non empaquetée**.
-          - **Firefox PC :** téléchargez l'archive `*-firefox.zip`, ouvrez `about:debugging#/runtime/this-firefox` → **Charger un module complémentaire temporaire…** et sélectionnez le fichier `.zip` (ou son `manifest.json` décompressé).
+          ### Quick Installation
+          - **Firefox (Desktop):** download `*-firefox.zip`, open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** and select the `.zip` archive (or extracted `manifest.json`). *(Use AMO signing for permanent installation on Firefox Release.)*
+          - **Chrome / Brave / Edge:** download `*-chrome.zip`, extract it, open `chrome://extensions`, enable **Developer mode**, and click **Load unpacked**.
 
-          ### Ajouter le dépôt de sources communautaire
-          Dans KumoYomi → **Sources & Dépôts**, collez :
+          ### Add the Community Sources Repository
+          In KumoYomi → **Sources & Repos**, paste:
           `https://github.com/KumoYomi-Sources/extensions-source`
           EOF
 

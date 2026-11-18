@@ -23,6 +23,8 @@ import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { DEFAULT_APP_SETTINGS, db, getOrCreateSettings } from '@/src/core/db/db';
 import { recordChapterProgress } from '@/src/core/db/mangaRepository';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
+import { useTranslation } from '@/src/core/i18n';
+import type { TranslationKey } from '@/src/core/i18n/types';
 import {
   fetchImageAsBlobUrl,
   revokeScopeBlobUrls,
@@ -44,6 +46,7 @@ interface LazyWebtoonPageProps {
   referer?: string;
   scopeId: string;
   offlineChapterId?: string;
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
   registerRef: (el: HTMLDivElement | null) => void;
 }
 
@@ -53,6 +56,7 @@ function LazyWebtoonPage({
   referer,
   scopeId,
   offlineChapterId,
+  t,
   registerRef,
 }: LazyWebtoonPageProps) {
   const [shouldLoad, setShouldLoad] = useState(index <= 2);
@@ -92,8 +96,8 @@ function LazyWebtoonPage({
           scopeId={scopeId}
           offlineChapterId={offlineChapterId}
           pageIndex={page.index}
-          alt={`Planche ${index + 1}`}
-          loadingLabel={`Chargement de la page ${index + 1}...`}
+          alt={t('reader.pageAlt', { num: index + 1 })}
+          loadingLabel={t('reader.loadingPage', { num: index + 1 })}
           priority="high"
           showRetry
           placeholderClassName="mx-auto min-h-[65vh] w-full rounded-lg"
@@ -102,7 +106,7 @@ function LazyWebtoonPage({
       ) : (
         <div className="mx-auto flex min-h-[65vh] w-full flex-col items-center justify-center gap-2 rounded-lg border border-zinc-900 bg-zinc-950/80 text-zinc-600">
           <Loader2 className="h-5 w-5 animate-spin opacity-60" />
-          <span className="text-xs">Planche {index + 1}</span>
+          <span className="text-xs">{t('reader.pagePlaceholder', { num: index + 1 })}</span>
         </div>
       )}
     </div>
@@ -110,6 +114,7 @@ function LazyWebtoonPage({
 }
 
 export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
+  const { t } = useTranslation();
   const manga = useLiveQuery(() => db.mangas.get(mangaId), [mangaId]);
   const chapter = useLiveQuery(() => db.chapters.get(chapterId), [chapterId]);
   const source = useLiveQuery(
@@ -577,17 +582,17 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
             >
               <ArrowLeft className="h-4 w-4" />
-              Fiche
+              {t('common.back')}
             </button>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <p className="truncate text-sm font-semibold text-white">
-                  {manga?.title ?? 'Chargement...'}
+                  {manga?.title ?? t('common.loading')}
                 </p>
                 {isOfflineCached && (
                   <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
                     <HardDrive className="h-3 w-3" />
-                    Hors-ligne
+                    {t('common.offline')}
                   </span>
                 )}
               </div>
@@ -601,7 +606,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               <button
                 type="button"
                 disabled={!prevChapter}
-                title="Chapitre précédent ([)"
+                title={t('reader.prevChapter')}
                 onClick={() =>
                   prevChapter &&
                   navigate({ name: 'reader', mangaId, chapterId: prevChapter.id })
@@ -611,7 +616,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <select
-                aria-label="Choisir le chapitre"
+                aria-label={t('reader.selectChapter')}
                 value={chapterId}
                 onChange={(e) =>
                   navigate({ name: 'reader', mangaId, chapterId: e.target.value })
@@ -627,7 +632,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               <button
                 type="button"
                 disabled={!nextChapter}
-                title="Chapitre suivant (])"
+                title={t('reader.nextChapter')}
                 onClick={() =>
                   nextChapter &&
                   navigate({ name: 'reader', mangaId, chapterId: nextChapter.id })
@@ -648,7 +653,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 }`}
               >
                 <Rows3 className="h-3.5 w-3.5" />
-                Webtoon
+                {t('reader.modeWebtoon')}
               </button>
               <button
                 type="button"
@@ -658,7 +663,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 }`}
               >
                 <FileImage className="h-3.5 w-3.5" />
-                Page
+                {t('reader.modePage')}
               </button>
               <button
                 type="button"
@@ -668,14 +673,14 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 }`}
               >
                 <Columns2 className="h-3.5 w-3.5" />
-                Double
+                {t('reader.modeDouble')}
               </button>
             </div>
 
             <button
               type="button"
               onClick={() => setShowOptions((v) => !v)}
-              title="Options du lecteur"
+              title={t('reader.optionsTooltip')}
               className="rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
             >
               <SlidersHorizontal className="h-4 w-4" />
@@ -684,7 +689,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             <button
               type="button"
               onClick={() => void toggleFullscreen()}
-              title="Plein écran (F)"
+              title={t('reader.fullscreenTooltip')}
               className="rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
             >
               {isFullscreen ? (
@@ -700,7 +705,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
           <div className="border-t border-zinc-800/80 bg-[#0f1018] px-6 py-3 text-xs">
             <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-6">
               <div className="flex items-center gap-2">
-                <span className="text-zinc-400">Sens :</span>
+                <span className="text-zinc-400">{t('reader.directionLabel')}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -710,14 +715,14 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                   }}
                   className="rounded-lg border border-zinc-700 bg-zinc-900 px-2.5 py-1 font-semibold text-zinc-200"
                 >
-                  {direction === 'ltr' ? 'Gauche → Droite (Webtoon/BD)' : 'Droite → Gauche (Manga)'}
+                  {direction === 'ltr' ? t('reader.dirLtr') : t('reader.dirRtl')}
                 </button>
               </div>
 
               {readerMode === 'webtoon' && (
                 <>
                   <label className="flex items-center gap-3 text-zinc-400">
-                    Largeur ({webtoonWidth} px)
+                    {t('reader.widthLabel', { px: webtoonWidth })}
                     <input
                       type="range"
                       min={560}
@@ -733,7 +738,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                     />
                   </label>
                   <label className="flex items-center gap-3 text-zinc-400">
-                    Espacement ({webtoonGap} px)
+                    {t('reader.gapLabel', { px: webtoonGap })}
                     <input
                       type="range"
                       min={0}
@@ -754,13 +759,13 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               {readerMode !== 'webtoon' && (
                 <>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-zinc-400">Ajustement :</span>
+                    <span className="text-zinc-400">{t('reader.fitLabel')}</span>
                     <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
                       {(
                         [
-                          { id: 'contain', label: 'Écran' },
-                          { id: 'width', label: 'Largeur' },
-                          { id: 'original', label: 'Original' },
+                          { id: 'contain', labelKey: 'reader.fitContain' },
+                          { id: 'width', labelKey: 'reader.fitWidth' },
+                          { id: 'original', labelKey: 'reader.fitOriginal' },
                         ] as const
                       ).map((opt) => (
                         <button
@@ -776,19 +781,19 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                               : 'text-zinc-400 hover:text-zinc-200'
                           }`}
                         >
-                          {opt.label}
+                          {t(opt.labelKey)}
                         </button>
                       ))}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1">
-                    <span className="text-zinc-400 mr-1">Zoom :</span>
+                    <span className="text-zinc-400 mr-1">{t('reader.zoomLabel')}</span>
                     <button
                       type="button"
                       onClick={() => setZoomPercent((z) => Math.max(60, z - 15))}
                       className="rounded-lg border border-zinc-700 bg-zinc-900 p-1 text-zinc-200 hover:bg-zinc-800"
-                      title="Dézoomer"
+                      title={t('reader.zoomOut')}
                     >
                       <ZoomOut className="h-3.5 w-3.5" />
                     </button>
@@ -799,7 +804,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                       type="button"
                       onClick={() => setZoomPercent((z) => Math.min(200, z + 15))}
                       className="rounded-lg border border-zinc-700 bg-zinc-900 p-1 text-zinc-200 hover:bg-zinc-800"
-                      title="Zoomer"
+                      title={t('reader.zoomIn')}
                     >
                       <ZoomIn className="h-3.5 w-3.5" />
                     </button>
@@ -808,7 +813,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                         type="button"
                         onClick={() => setZoomPercent(100)}
                         className="rounded-lg border border-zinc-700 bg-zinc-900 p-1 text-zinc-300 hover:bg-zinc-800"
-                        title="Réinitialiser à 100%"
+                        title={t('reader.zoomReset')}
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                       </button>
@@ -828,12 +833,12 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                     }}
                     className="accent-rose-500"
                   />
-                  Couverture seule en première page
+                  {t('reader.doubleCoverOffset')}
                 </label>
               )}
 
               <label className="flex items-center gap-3 text-zinc-400">
-                Préchargement ({preloadCount} p.)
+                {t('reader.preloadLabel', { count: preloadCount })}
                 <input
                   type="range"
                   min={0}
@@ -849,9 +854,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 />
               </label>
 
-              <span className="text-zinc-500">
-                Raccourcis : ← / → ou Espace, F (Plein écran), M (Mode), [ / ] (Chapitre)
-              </span>
+              <span className="text-zinc-500">{t('reader.shortcuts')}</span>
             </div>
           </div>
         )}
@@ -863,7 +866,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
           type="button"
           onClick={() => setShowHud(true)}
           className="fixed right-4 top-4 z-30 rounded-full border border-zinc-700 bg-zinc-900/80 p-2 text-zinc-300 backdrop-blur hover:bg-zinc-800"
-          title="Afficher les contrôles"
+          title={t('reader.showControls')}
         >
           <Eye className="h-4 w-4" />
         </button>
@@ -874,7 +877,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
         {loadingPages && (
           <div className="flex min-h-[70vh] flex-col items-center justify-center gap-3 text-zinc-400">
             <Loader2 className="h-8 w-8 animate-spin text-rose-500" />
-            <p className="text-sm">Récupération des planches via le moteur anti-hotlink...</p>
+            <p className="text-sm">{t('reader.fetchingPages')}</p>
           </div>
         )}
 
@@ -914,6 +917,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 referer={source?.baseUrl}
                 scopeId={scopeId}
                 offlineChapterId={isOfflineCached ? chapterId : undefined}
+                t={t}
                 registerRef={(el) => {
                   webtoonRefs.current[idx] = el;
                 }}
@@ -931,8 +935,8 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               type="button"
               disabled={direction === 'rtl' ? !canGoNextPage : !canGoPrevPage}
               onClick={() => goStep(direction === 'rtl' ? 1 : -1)}
-              aria-label={direction === 'rtl' ? 'Page suivante' : 'Page précédente'}
-              title={direction === 'rtl' ? 'Page suivante (←)' : 'Page précédente (←)'}
+              aria-label={direction === 'rtl' ? t('reader.nextPageTooltip') : t('reader.prevPageTooltip')}
+              title={`${direction === 'rtl' ? t('reader.nextPageTooltip') : t('reader.prevPageTooltip')} (←)`}
               className="fixed left-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-zinc-700/80 bg-zinc-900/85 p-3 text-zinc-100 shadow-lg backdrop-blur transition hover:border-rose-500 hover:bg-rose-600 disabled:pointer-events-none disabled:opacity-25"
             >
               <ChevronLeft className="h-5 w-5" />
@@ -942,8 +946,8 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               type="button"
               disabled={direction === 'rtl' ? !canGoPrevPage : !canGoNextPage}
               onClick={() => goStep(direction === 'rtl' ? -1 : 1)}
-              aria-label={direction === 'rtl' ? 'Page précédente' : 'Page suivante'}
-              title={direction === 'rtl' ? 'Page précédente (→)' : 'Page suivante (→)'}
+              aria-label={direction === 'rtl' ? t('reader.prevPageTooltip') : t('reader.nextPageTooltip')}
+              title={`${direction === 'rtl' ? t('reader.prevPageTooltip') : t('reader.nextPageTooltip')} (→)`}
               className="fixed right-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-zinc-700/80 bg-zinc-900/85 p-3 text-zinc-100 shadow-lg backdrop-blur transition hover:border-rose-500 hover:bg-rose-600 disabled:pointer-events-none disabled:opacity-25"
             >
               <ChevronRight className="h-5 w-5" />
@@ -958,8 +962,8 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                   scopeId={scopeId}
                   offlineChapterId={isOfflineCached ? chapterId : undefined}
                   pageIndex={pages[currentPage]?.index}
-                  alt={`Planche ${currentPage + 1}`}
-                  loadingLabel={`Chargement de la page ${currentPage + 1}...`}
+                  alt={t('reader.pageAlt', { num: currentPage + 1 })}
+                  loadingLabel={t('reader.loadingPage', { num: currentPage + 1 })}
                   priority="high"
                   showRetry
                   placeholderClassName="h-[68vh] w-[min(85vw,680px)] rounded-xl"
@@ -989,8 +993,8 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                     scopeId={scopeId}
                     offlineChapterId={isOfflineCached ? chapterId : undefined}
                     pageIndex={p.index}
-                    alt={`Planche ${p.index + 1}`}
-                    loadingLabel={`Chargement de la page ${p.index + 1}...`}
+                    alt={t('reader.pageAlt', { num: p.index + 1 })}
+                    loadingLabel={t('reader.loadingPage', { num: p.index + 1 })}
                     priority="high"
                     showRetry
                     placeholderClassName="h-[68vh] w-[42vw] max-w-[540px] rounded-xl"
@@ -1016,7 +1020,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               onClick={() => navigate({ name: 'manga', mangaId })}
               className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-2.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
             >
-              Retour à la fiche manga
+              {t('reader.backToManga')}
             </button>
             {nextChapter && (
               <button
@@ -1026,7 +1030,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 }
                 className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-rose-500"
               >
-                Chapitre suivant : {nextChapter.title}
+                {t('reader.nextChapterCta', { title: nextChapter.title })}
                 <ChevronRight className="h-4 w-4" />
               </button>
             )}
@@ -1050,7 +1054,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-35"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
-                Préc.
+                {t('reader.prevShort')}
               </button>
             )}
             <span className="min-w-[6.5rem] shrink-0 text-center font-mono text-zinc-400">
@@ -1058,13 +1062,20 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 if (readerMode === 'double') {
                   const spread = spreads[currentSpreadIndex] ?? [];
                   if (spread.length >= 2) {
-                    return `Pages ${spread[0]!.index + 1}–${spread[spread.length - 1]!.index + 1} / ${pages.length}`;
+                    return t('reader.pagesRange', {
+                      start: spread[0]!.index + 1,
+                      end: spread[spread.length - 1]!.index + 1,
+                      total: pages.length,
+                    });
                   }
                   if (spread.length === 1) {
-                    return `Page ${spread[0]!.index + 1} / ${pages.length}`;
+                    return t('reader.pageCounter', {
+                      current: spread[0]!.index + 1,
+                      total: pages.length,
+                    });
                   }
                 }
-                return `Page ${currentPage + 1} / ${pages.length}`;
+                return t('reader.pageCounter', { current: currentPage + 1, total: pages.length });
               })()}
             </span>
             <input
@@ -1088,7 +1099,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 onClick={() => goStep(1)}
                 className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-35"
               >
-                Suiv.
+                {t('reader.nextShort')}
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
             )}

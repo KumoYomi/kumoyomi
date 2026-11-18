@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Download, HardDrive, ShieldCheck, Trash2, Upload } from 'lucide-react';
+import { Download, Globe, HardDrive, ShieldCheck, Trash2, Upload } from 'lucide-react';
 import { type ChangeEvent, useEffect, useState } from 'react';
 import {
   exportBackupPayload,
@@ -8,13 +8,21 @@ import {
 } from '@/src/core/db/backup';
 import { DEFAULT_APP_SETTINGS, db, getOrCreateSettings } from '@/src/core/db/db';
 import { sendBackgroundMessage } from '@/src/core/extension/browserBridge';
+import { LOCALE_OPTIONS, useTranslation } from '@/src/core/i18n';
 import { clearCoverBlobCache } from '@/src/core/image-loader/blobImageLoader';
 import { clearAllOfflineChapters, formatBytes } from '@/src/core/offline/offlineCache';
 import { clearTabProxyCache } from '@/src/core/parser/httpClient';
 import { syncAllSourceRulesToBackground } from '@/src/core/parser/repositoryService';
-import type { AppSettings, PageFitMode, ReaderMode, ReadingDirection } from '@/src/core/types/manga';
+import type {
+  AppLocale,
+  AppSettings,
+  PageFitMode,
+  ReaderMode,
+  ReadingDirection,
+} from '@/src/core/types/manga';
 
 export function SettingsPage() {
+  const { locale, t, setLocale } = useTranslation();
   const settings = useLiveQuery(() => db.settings.get('default'), [], DEFAULT_APP_SETTINGS);
   const mangasCount = useLiveQuery(() => db.mangas.filter((m) => m.favorite).count(), [], 0) ?? 0;
   const sourcesCount = useLiveQuery(() => db.sources.count(), [], 0) ?? 0;
@@ -57,10 +65,13 @@ export function SettingsPage() {
   async function handleExportBackup() {
     const payload = await exportBackupPayload();
     const dateSlug = new Date().toISOString().slice(0, 10);
-    triggerJsonDownload(`kumoyomi-sauvegarde-${dateSlug}.json`, payload);
+    triggerJsonDownload(`kumoyomi-backup-${dateSlug}.json`, payload);
     setStatusMessage({
       kind: 'ok',
-      text: `Sauvegarde exportée (${payload.mangas.length} manga(s), ${payload.sources.length} source(s)).`,
+      text: t('settings.backupExported', {
+        mangas: payload.mangas.length,
+        sources: payload.sources.length,
+      }),
     });
   }
 
@@ -74,12 +85,16 @@ export function SettingsPage() {
       await syncAllSourceRulesToBackground();
       setStatusMessage({
         kind: 'ok',
-        text: `Sauvegarde restaurée : ${summary.mangasCount} manga(s), ${summary.sourcesCount} source(s), ${summary.chaptersCount} chapitre(s).`,
+        text: t('settings.backupRestored', {
+          mangas: summary.mangasCount,
+          sources: summary.sourcesCount,
+          chapters: summary.chaptersCount,
+        }),
       });
     } catch (err) {
       setStatusMessage({
         kind: 'error',
-        text: err instanceof Error ? err.message : 'Erreur lors de la restauration.',
+        text: err instanceof Error ? err.message : t('settings.backupError'),
       });
     }
   }
@@ -88,7 +103,7 @@ export function SettingsPage() {
     await clearCoverBlobCache();
     setStatusMessage({
       kind: 'ok',
-      text: 'Cache local des couvertures vidé.',
+      text: t('settings.coversCleared'),
     });
   }
 
@@ -96,7 +111,7 @@ export function SettingsPage() {
     await clearAllOfflineChapters();
     setStatusMessage({
       kind: 'ok',
-      text: 'Cache des chapitres hors-ligne vidé.',
+      text: t('settings.offlineCleared'),
     });
   }
 
@@ -104,7 +119,7 @@ export function SettingsPage() {
     clearTabProxyCache();
     setStatusMessage({
       kind: 'ok',
-      text: 'Sessions Cloudflare mémorisées réinitialisées.',
+      text: t('settings.cfResetDone'),
     });
   }
 
@@ -113,10 +128,8 @@ export function SettingsPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-white">Paramètres</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Préférences du lecteur, vérification automatique et sauvegarde locale 100 % hors-ligne.
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight text-white">{t('settings.title')}</h1>
+        <p className="mt-1 text-sm text-zinc-400">{t('settings.subtitle')}</p>
       </header>
 
       {statusMessage && (
@@ -131,26 +144,50 @@ export function SettingsPage() {
         </div>
       )}
 
+      {/* Langue de l'interface */}
+      <section className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-5 space-y-3">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+          <Globe className="h-4 w-4 text-rose-400" />
+          {t('settings.languageSection')}
+        </h2>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          {LOCALE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => void setLocale(opt.value as AppLocale)}
+              className={`rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${
+                locale === opt.value
+                  ? 'border-rose-500/50 bg-rose-500/15 text-rose-200'
+                  : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700 hover:text-white'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       {/* Lecteur par défaut */}
       <section className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-white">Lecteur par défaut</h2>
+        <h2 className="text-sm font-semibold text-white">{t('settings.readerSection')}</h2>
 
         <div className="grid gap-4 sm:grid-cols-3">
           <label className="space-y-1.5 text-xs text-zinc-400">
-            <span>Mode de lecture</span>
+            <span>{t('settings.readerMode')}</span>
             <select
               value={currentSettings.readerMode}
               onChange={(e) => void updateSettings({ readerMode: e.target.value as ReaderMode })}
               className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
             >
-              <option value="webtoon">Webtoon (Défilement vertical)</option>
-              <option value="single">Page simple</option>
-              <option value="double">Double-page (Tome ouvert)</option>
+              <option value="webtoon">{t('settings.modeWebtoon')}</option>
+              <option value="single">{t('settings.modeSingle')}</option>
+              <option value="double">{t('settings.modeDouble')}</option>
             </select>
           </label>
 
           <label className="space-y-1.5 text-xs text-zinc-400">
-            <span>Sens de lecture</span>
+            <span>{t('settings.readingDirection')}</span>
             <select
               value={currentSettings.readingDirection}
               onChange={(e) =>
@@ -158,13 +195,13 @@ export function SettingsPage() {
               }
               className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
             >
-              <option value="ltr">Gauche → Droite</option>
-              <option value="rtl">Droite → Gauche (Manga)</option>
+              <option value="ltr">{t('settings.dirLtr')}</option>
+              <option value="rtl">{t('settings.dirRtl')}</option>
             </select>
           </label>
 
           <label className="space-y-1.5 text-xs text-zinc-400">
-            <span>Ajustement (Page / Double)</span>
+            <span>{t('settings.fitMode')}</span>
             <select
               value={currentSettings.pageFitMode ?? 'contain'}
               onChange={(e) =>
@@ -172,16 +209,16 @@ export function SettingsPage() {
               }
               className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
             >
-              <option value="contain">Ajuster à l&apos;écran</option>
-              <option value="width">Pleine largeur</option>
-              <option value="original">Taille réelle (100%)</option>
+              <option value="contain">{t('settings.fitContain')}</option>
+              <option value="width">{t('settings.fitWidth')}</option>
+              <option value="original">{t('settings.fitOriginal')}</option>
             </select>
           </label>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block space-y-1.5 text-xs text-zinc-400">
-            <span>Largeur Webtoon par défaut ({currentSettings.webtoonWidth} px)</span>
+            <span>{t('settings.webtoonWidth', { px: currentSettings.webtoonWidth })}</span>
             <input
               type="range"
               min={560}
@@ -196,7 +233,7 @@ export function SettingsPage() {
           </label>
 
           <label className="block space-y-1.5 text-xs text-zinc-400">
-            <span>Espacement Webtoon ({currentSettings.webtoonGap ?? 0} px)</span>
+            <span>{t('settings.webtoonGap', { px: currentSettings.webtoonGap ?? 0 })}</span>
             <input
               type="range"
               min={0}
@@ -213,7 +250,7 @@ export function SettingsPage() {
 
         <label className="block space-y-1.5 text-xs text-zinc-400">
           <span>
-            Pages à précharger à l’avance ({currentSettings.preloadPagesCount ?? 4} page(s))
+            {t('settings.preloadPages', { count: currentSettings.preloadPagesCount ?? 4 })}
           </span>
           <input
             type="range"
@@ -233,7 +270,7 @@ export function SettingsPage() {
       <section className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-5 space-y-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
           <ShieldCheck className="h-4 w-4 text-amber-400" />
-          Vérification Cloudflare / Captcha
+          {t('settings.cfSection')}
         </h2>
         <label className="flex cursor-pointer items-start gap-3 text-xs text-zinc-300">
           <input
@@ -244,10 +281,7 @@ export function SettingsPage() {
             }
             className="mt-0.5 accent-rose-500"
           />
-          <span>
-            Ouvrir automatiquement une petite fenêtre dédiée lorsqu&apos;un site demande une
-            vérification Cloudflare ou Captcha (refermée dès que la validation passe).
-          </span>
+          <span>{t('settings.cfAutoPopupDesc')}</span>
         </label>
         <div>
           <button
@@ -255,16 +289,16 @@ export function SettingsPage() {
             onClick={handleResetCloudflareCache}
             className="rounded-xl border border-zinc-800 bg-zinc-900 px-3.5 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
           >
-            Réinitialiser les sessions Cloudflare mémorisées
+            {t('settings.cfResetBtn')}
           </button>
         </div>
       </section>
 
       {/* Mises à jour automatiques */}
       <section className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-white">Vérification automatique en arrière-plan</h2>
+        <h2 className="text-sm font-semibold text-white">{t('settings.updatesSection')}</h2>
         <label className="block space-y-1.5 text-xs text-zinc-400">
-          <span>Fréquence de recherche des nouveaux chapitres</span>
+          <span>{t('settings.updateFrequency')}</span>
           <select
             value={currentSettings.updateIntervalMinutes}
             onChange={(e) =>
@@ -274,11 +308,11 @@ export function SettingsPage() {
             }
             className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100"
           >
-            <option value={30}>Toutes les 30 minutes</option>
-            <option value={60}>Toutes les heures</option>
-            <option value={120}>Toutes les 2 heures</option>
-            <option value={360}>Toutes les 6 heures</option>
-            <option value={1440}>Une fois par jour</option>
+            <option value={30}>{t('settings.every30m')}</option>
+            <option value={60}>{t('settings.every1h')}</option>
+            <option value={120}>{t('settings.every2h')}</option>
+            <option value={360}>{t('settings.every6h')}</option>
+            <option value={1440}>{t('settings.every1d')}</option>
           </select>
         </label>
       </section>
@@ -289,11 +323,16 @@ export function SettingsPage() {
           <div>
             <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
               <HardDrive className="h-4 w-4 text-rose-400" />
-              Sauvegarde locale & Stockage (IndexedDB)
+              {t('settings.storageSection')}
             </h2>
             <p className="mt-1 text-xs text-zinc-400">
-              {mangasCount} favori(s) · {sourcesCount} source(s) · {coverCacheCount} couverture(s) ·{' '}
-              {offlineChapters.length} chapitre(s) hors-ligne ({formatBytes(offlineBytes)})
+              {t('settings.storageStats', {
+                mangas: mangasCount,
+                sources: sourcesCount,
+                covers: coverCacheCount,
+                offline: offlineChapters.length,
+                size: formatBytes(offlineBytes),
+              })}
               {storageEstimate
                 ? ` · ${formatBytes(storageEstimate.usage)} / ${formatBytes(storageEstimate.quota)}`
                 : ''}
@@ -308,12 +347,12 @@ export function SettingsPage() {
             className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-rose-500"
           >
             <Download className="h-4 w-4" />
-            Exporter ma sauvegarde (.json)
+            {t('settings.exportBackup')}
           </button>
 
           <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">
             <Upload className="h-4 w-4" />
-            Importer une sauvegarde (.json)
+            {t('settings.importBackup')}
             <input
               type="file"
               accept=".json,application/json"
@@ -328,7 +367,7 @@ export function SettingsPage() {
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
           >
             <Trash2 className="h-4 w-4" />
-            Vider le cache couvertures
+            {t('settings.clearCovers')}
           </button>
 
           {offlineChapters.length > 0 && (
@@ -338,7 +377,7 @@ export function SettingsPage() {
               className="inline-flex items-center gap-2 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-xs font-medium text-rose-300 hover:bg-zinc-800"
             >
               <Trash2 className="h-4 w-4" />
-              Vider les chapitres hors-ligne
+              {t('settings.clearOffline')}
             </button>
           )}
         </div>

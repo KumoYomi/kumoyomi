@@ -1,5 +1,6 @@
 import { ImageOff, Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTranslation } from '@/src/core/i18n';
 import { fetchImageAsBlobUrl } from '@/src/core/image-loader/blobImageLoader';
 
 interface AntiHotlinkImageProps {
@@ -31,6 +32,7 @@ export function AntiHotlinkImage({
   showRetry = false,
   onImageLoad,
 }: AntiHotlinkImageProps) {
+  const { t } = useTranslation();
   const [blobSrc, setBlobSrc] = useState<string | null>(null);
   const [directFallback, setDirectFallback] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(Boolean(src));
@@ -105,20 +107,12 @@ export function AntiHotlinkImage({
   const resolvedSrc = blobSrc ?? (directFallback ? src : null);
 
   if (error || !resolvedSrc) {
-    const isCfHint =
-      errorMessage?.toLowerCase().includes('cloudflare') || errorMessage?.includes('403');
     return (
       <div
         className={`flex flex-col items-center justify-center gap-2 border border-zinc-800/70 bg-zinc-900/90 p-4 text-center text-xs text-zinc-400 ${boxClass}`}
       >
         <ImageOff className="h-6 w-6 text-zinc-500" />
-        <span>Image bloquée ou indisponible</span>
-        {isCfHint && showRetry && (
-          <span className="max-w-xs text-[11px] text-amber-300/80">
-            Session Cloudflare expirée ? Rechargez l’onglet du site (F5) puis cliquez sur
-            Réessayer.
-          </span>
-        )}
+        <span>{t('image.unavailable')}</span>
         {showRetry && (
           <button
             type="button"
@@ -129,7 +123,7 @@ export function AntiHotlinkImage({
             className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            Réessayer
+            {t('common.retry')}
           </button>
         )}
       </div>

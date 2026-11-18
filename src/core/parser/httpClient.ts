@@ -25,12 +25,12 @@ export class CloudflareChallengeError extends Error {
   }) {
     const suffix =
       params.reason === 'tab_blocked'
-        ? " (l'onglet ouvert renvoie lui aussi un blocage Cloudflare : rechargez-le avec F5)"
+        ? ' (the open tab is also returning a Cloudflare challenge — reload it with F5)'
         : params.reason === 'no_tab'
-          ? ' (aucun onglet ouvert trouvé sur ce domaine)'
+          ? ' (no open tab found for this domain)'
           : '';
     super(
-      `Protection Cloudflare / anti-bot détectée sur ${params.sourceName} (HTTP ${params.status})${suffix}.`,
+      `Cloudflare / anti-bot protection detected on ${params.sourceName} (HTTP ${params.status})${suffix}.`,
     );
     this.name = 'CloudflareChallengeError';
     this.sourceId = params.sourceId;
@@ -55,7 +55,7 @@ export class SourceHttpError extends Error {
     statusText: string;
     message?: string;
   }) {
-    super(params.message ?? `Erreur HTTP ${params.status} (${params.statusText}) sur ${params.url}`);
+    super(params.message ?? `HTTP error ${params.status} (${params.statusText}) at ${params.url}`);
     this.name = 'SourceHttpError';
     this.sourceId = params.sourceId;
     this.url = params.url;
@@ -222,7 +222,7 @@ async function tryFetchViaOpenTab(
       url,
       status: 0,
       statusText: 'Tab Proxy Error',
-      message: `Impossible de joindre ${source.name} depuis l'onglet ouvert (${res.error}).`,
+      message: `Unable to reach ${source.name} via the open tab (${res.error}).`,
     });
   }
 
@@ -306,7 +306,7 @@ async function executeTimedFetch(
         url,
         status: 408,
         statusText: 'Timeout',
-        message: `Délai dépassé (${timeoutMs / 1000}s) lors de la connexion à ${source.name}.`,
+        message: `Request timed out (${timeoutMs / 1000}s) while connecting to ${source.name}.`,
       });
     }
     throw new SourceHttpError({
@@ -314,7 +314,7 @@ async function executeTimedFetch(
       url,
       status: 0,
       statusText: 'Network Error',
-      message: `Impossible de joindre ${source.name} (${err instanceof Error ? err.message : 'Erreur réseau'}).`,
+      message: `Unable to reach ${source.name} (${err instanceof Error ? err.message : 'Network error'}).`,
     });
   } finally {
     clearTimeout(timer);
@@ -487,7 +487,7 @@ export async function fetchSourceResponse(
     try {
       json = JSON.parse(text);
     } catch {
-      throw new Error(`Réponse JSON invalide reçue de ${source.name}.`);
+      throw new Error(`Invalid JSON response received from ${source.name}.`);
     }
   }
 

@@ -47,12 +47,12 @@ export async function importBackupJson(rawJson: string): Promise<{
 }> {
   const parsed: unknown = JSON.parse(rawJson);
   if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Fichier de sauvegarde invalide (objet JSON attendu).');
+    throw new Error('Invalid backup file (JSON object expected).');
   }
 
   const payload = parsed as Partial<KumoYomiBackupPayload>;
   if (payload.schemaVersion !== 1) {
-    throw new Error('Version de sauvegarde non supportée.');
+    throw new Error('Unsupported backup version.');
   }
 
   const repositories = Array.isArray(payload.repositories) ? payload.repositories : [];

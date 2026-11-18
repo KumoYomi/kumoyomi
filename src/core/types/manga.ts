@@ -5,6 +5,7 @@ export type LibraryStatus = 'reading' | 'plan_to_read' | 'completed' | 'on_hold'
 export type ReaderMode = 'webtoon' | 'single' | 'double';
 export type ReadingDirection = 'ltr' | 'rtl';
 export type PageFitMode = 'contain' | 'width' | 'original';
+export type AppLocale = 'en' | 'fr' | 'es' | 'zh';
 
 export interface OfflineChapterMeta {
   chapterId: string;
@@ -119,6 +120,7 @@ export interface ReadingHistoryEntry {
 
 export interface AppSettings {
   id: 'default';
+  language?: AppLocale;
   readerMode: ReaderMode;
   readingDirection: ReadingDirection;
   pageFitMode?: PageFitMode;

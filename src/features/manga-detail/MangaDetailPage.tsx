@@ -31,6 +31,7 @@ import {
   upsertMangaFromCatalogueItem,
 } from '@/src/core/db/mangaRepository';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
+import { useTranslation } from '@/src/core/i18n';
 import {
   downloadChapterOffline,
   formatBytes,
@@ -40,23 +41,16 @@ import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import type { ChapterEntity, LibraryStatus } from '@/src/core/types/manga';
 
-const STATUS_LABELS: Record<string, string> = {
-  ongoing: 'En cours',
-  completed: 'Terminé',
-  hiatus: 'En pause',
-  cancelled: 'Abandonné',
-  unknown: 'Inconnu',
-};
-
-const LIBRARY_STATUS_OPTIONS: Array<{ value: LibraryStatus; label: string }> = [
-  { value: 'reading', label: 'En lecture' },
-  { value: 'plan_to_read', label: 'À lire' },
-  { value: 'completed', label: 'Terminé' },
-  { value: 'on_hold', label: 'En pause' },
-  { value: 'dropped', label: 'Abandonné' },
+const LIBRARY_STATUS_KEYS: LibraryStatus[] = [
+  'reading',
+  'plan_to_read',
+  'completed',
+  'on_hold',
+  'dropped',
 ];
 
 export function MangaDetailPage({ mangaId }: { mangaId: string }) {
+  const { t, formatDate } = useTranslation();
   const manga = useLiveQuery(() => db.mangas.get(mangaId), [mangaId]);
   const links =
     useLiveQuery(() => db.mangaSources.where('mangaId').equals(mangaId).toArray(), [mangaId], []) ??
@@ -265,13 +259,13 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
   if (!manga) {
     return (
       <div className="py-20 text-center text-sm text-zinc-400">
-        Manga introuvable dans la base locale.{' '}
+        {t('manga.notFound')}{' '}
         <button
           type="button"
           onClick={() => navigate({ name: 'explore' })}
           className="text-rose-400 underline"
         >
-          Explorer les sources
+          {t('manga.exploreSources')}
         </button>
       </div>
     );
@@ -285,7 +279,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
         className="inline-flex items-center gap-2 text-xs font-medium text-zinc-400 hover:text-white"
       >
         <ArrowLeft className="h-4 w-4" />
-        Retour
+        {t('common.back')}
       </button>
 
       {/* En-tête fiche manga */}
@@ -304,16 +298,16 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-rose-500/15 px-3 py-0.5 text-xs font-semibold text-rose-300">
-                  {STATUS_LABELS[manga.publicationStatus] ?? 'Inconnu'}
+                  {t(`pubStatus.${manga.publicationStatus}`)}
                 </span>
                 {manga.author && (
                   <span className="text-xs text-zinc-400">
-                    Auteur : <strong className="text-zinc-200">{manga.author}</strong>
+                    {t('manga.author')} <strong className="text-zinc-200">{manga.author}</strong>
                   </span>
                 )}
                 {manga.artist && manga.artist !== manga.author && (
                   <span className="text-xs text-zinc-400">
-                    · Dessin : <strong className="text-zinc-200">{manga.artist}</strong>
+                    · {t('manga.artist')} <strong className="text-zinc-200">{manga.artist}</strong>
                   </span>
                 )}
               </div>
@@ -362,8 +356,8 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 >
                   <Play className="h-4 w-4 fill-current" />
                   {resumeChapter.lastPageRead > 0
-                    ? `Reprendre : ${resumeChapter.title}`
-                    : `Lire : ${resumeChapter.title}`}
+                    ? `${t('updates.resumeBtn')}: ${resumeChapter.title}`
+                    : t('manga.readAction', { title: resumeChapter.title })}
                 </button>
               )}
 
@@ -379,7 +373,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 }`}
               >
                 <Heart className={`h-4 w-4 ${manga.favorite ? 'fill-rose-400 text-rose-400' : ''}`} />
-                {manga.favorite ? 'Dans la bibliothèque' : 'Ajouter aux favoris'}
+                {manga.favorite ? t('manga.inLibrary') : t('manga.addToLibrary')}
               </button>
 
               {manga.favorite && (
@@ -390,9 +384,9 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                   }
                   className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-xs font-medium text-zinc-200 focus:border-rose-500 focus:outline-none"
                 >
-                  {LIBRARY_STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                  {LIBRARY_STATUS_KEYS.map((key) => (
+                    <option key={key} value={key}>
+                      {t(`libStatus.${key}`)}
                     </option>
                   ))}
                 </select>
@@ -403,10 +397,10 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/70 p-3">
               <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
                 <Layers className="h-4 w-4 text-rose-400" />
-                Source active :
+                {t('manga.activeSource')}
               </div>
               <select
-                aria-label="Choisir la source"
+                aria-label={t('manga.activeSource')}
                 value={activeSourceId}
                 onChange={(e) => {
                   autoFetchedKeyRef.current = '';
@@ -431,7 +425,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
-                Actualiser
+                {t('common.refresh')}
               </button>
 
               <button
@@ -445,7 +439,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 ) : (
                   <Search className="h-3.5 w-3.5" />
                 )}
-                Chercher d’autres sources
+                {t('manga.findOtherSources')}
               </button>
             </div>
           </div>
@@ -473,12 +467,12 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
           <div className="flex items-center gap-2.5">
             <BookOpen className="h-4 w-4 text-rose-400" />
             <h2 className="text-base font-semibold text-white">
-              Chapitres ({chapters.length})
+              {t('manga.chaptersTitle', { count: chapters.length })}
             </h2>
             {offlineEntries.length > 0 && (
               <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
                 <HardDrive className="h-3 w-3" />
-                {offlineEntries.length} hors-ligne
+                {t('manga.offlineCount', { count: offlineEntries.length })}
               </span>
             )}
             {syncing && <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />}
@@ -489,7 +483,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
               type="search"
               value={chapterQuery}
               onChange={(e) => setChapterQuery(e.target.value)}
-              placeholder="Filtrer un chapitre..."
+              placeholder={t('manga.filterChapter')}
               className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
             />
             <button
@@ -501,7 +495,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                   : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
               }`}
             >
-              Non lus uniquement
+              {t('manga.unreadOnly')}
             </button>
             <button
               type="button"
@@ -509,7 +503,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
               className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
             >
               <ArrowUpDown className="h-3.5 w-3.5" />
-              {sortDesc ? 'Plus récents' : 'Plus anciens'}
+              {sortDesc ? t('manga.sortNewest') : t('manga.sortOldest')}
             </button>
             {activeSource && chapters.some((c) => !c.read && !offlineByChapterId.has(c.id)) && (
               <button
@@ -526,12 +520,12 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 {batchDownloading ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-rose-400" />
-                    Annuler téléchargement
+                    {t('manga.cancelDownload')}
                   </>
                 ) : (
                   <>
                     <Download className="h-3.5 w-3.5 text-rose-400" />
-                    Télécharger non lus
+                    {t('manga.downloadUnread')}
                   </>
                 )}
               </button>
@@ -550,16 +544,14 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
               >
                 <CheckCheck className="h-3.5 w-3.5" />
-                {chapters.some((c) => !c.read) ? 'Tout marquer lu' : 'Tout marquer non lu'}
+                {chapters.some((c) => !c.read) ? t('manga.markAllRead') : t('manga.markAllUnread')}
               </button>
             )}
           </div>
         </div>
 
         {orderedChapters.length === 0 && !syncing ? (
-          <p className="py-8 text-center text-sm text-zinc-500">
-            Aucun chapitre disponible pour cette source.
-          </p>
+          <p className="py-8 text-center text-sm text-zinc-500">{t('manga.noChapters')}</p>
         ) : (
           <div className="divide-y divide-zinc-800/60 overflow-hidden rounded-2xl border border-zinc-800/70 bg-zinc-950/50">
             {orderedChapters.map((chapter) => (
@@ -582,19 +574,19 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                     </span>
                     {chapter.isNew && !chapter.read && (
                       <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
-                        Nouveau
+                        {t('common.new')}
                       </span>
                     )}
                     {chapter.lastPageRead > 0 && !chapter.read && (
                       <span className="text-xs text-rose-300">
-                        · Page {chapter.lastPageRead + 1}
+                        · {t('updates.pageProgress', { page: chapter.lastPageRead + 1 })}
                         {chapter.totalPages > 0 ? `/${chapter.totalPages}` : ''}
                       </span>
                     )}
                   </div>
                   {chapter.publishedAt && (
                     <p className="mt-0.5 text-xs text-zinc-500">
-                      {new Date(chapter.publishedAt).toLocaleDateString('fr-FR', {
+                      {formatDate(chapter.publishedAt, {
                         day: 'numeric',
                         month: 'short',
                         year: 'numeric',
@@ -613,7 +605,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                           return (
                             <span
                               className="inline-flex items-center gap-1 rounded-lg bg-zinc-900 px-2 py-1 text-[11px] font-mono text-rose-300"
-                              title="Téléchargement hors-ligne en cours"
+                              title={t('manga.downloadingOffline')}
                             >
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               {dl.total > 0 ? `${dl.done}/${dl.total}` : '...'}
@@ -624,7 +616,9 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                           return (
                             <button
                               type="button"
-                              title={`Supprimer du cache hors-ligne (${formatBytes(offline.totalBytes)})`}
+                              title={t('manga.removeOffline', {
+                                size: formatBytes(offline.totalBytes),
+                              })}
                               onClick={() => void removeOfflineChapter(chapter.id)}
                               className="group inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-medium text-emerald-300 hover:bg-rose-500/15 hover:text-rose-300"
                             >
@@ -637,7 +631,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                         return (
                           <button
                             type="button"
-                            title="Télécharger pour lecture hors-ligne"
+                            title={t('manga.downloadOffline')}
                             onClick={() => void handleDownloadSingleChapter(chapter)}
                             className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
                           >
@@ -647,7 +641,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                       })()}
                       <button
                         type="button"
-                        title="Marquer jusqu'ici comme lu"
+                        title={t('manga.markUpToHere')}
                         onClick={() => {
                           const toMark = chapters
                             .filter((c) => c.orderIndex >= chapter.orderIndex)
@@ -660,7 +654,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                       </button>
                       <button
                         type="button"
-                        title={chapter.read ? 'Marquer non lu' : 'Marquer lu'}
+                        title={chapter.read ? t('manga.markUnread') : t('manga.markRead')}
                         onClick={() =>
                           void markChaptersReadState(
                             manga.id,

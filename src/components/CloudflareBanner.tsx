@@ -4,6 +4,7 @@ import {
   openExternalTab,
   requestCloudflareVerificationPopup,
 } from '@/src/core/extension/browserBridge';
+import { useTranslation } from '@/src/core/i18n';
 
 interface CloudflareBannerProps {
   sourceName: string;
@@ -22,6 +23,7 @@ export function CloudflareBanner({
   onDismiss,
   compact = false,
 }: CloudflareBannerProps) {
+  const { t } = useTranslation();
   const [waitingUnlock, setWaitingUnlock] = useState(false);
   const [verifyingPopup, setVerifyingPopup] = useState(false);
   const [dismissed, setDismissed] = useState(false);
@@ -88,14 +90,10 @@ export function CloudflareBanner({
           </div>
           <div className="space-y-1">
             <p className="text-sm font-semibold text-amber-200">
-              Vérification Cloudflare / Captcha requise sur {sourceName}
+              {t('cf.title', { source: sourceName })}
             </p>
             <p className="text-xs leading-relaxed text-amber-200/80">
-              {verifyingPopup
-                ? 'Validez la vérification dans la petite fenêtre — elle se refermera automatiquement dès que la session sera débloquée.'
-                : waitingUnlock
-                  ? 'Onglet ouvert : validez la page puis revenez ici — KumoYomi relancera automatiquement.'
-                  : 'Ouvrez la petite fenêtre de vérification pour cocher Cloudflare/Captcha ; elle se refermera toute seule dès que le site répond.'}
+              {verifyingPopup ? t('cf.descPopup') : waitingUnlock ? t('cf.descTab') : t('cf.descIdle')}
             </p>
           </div>
         </div>
@@ -112,7 +110,7 @@ export function CloudflareBanner({
             ) : (
               <ShieldAlert className="h-3.5 w-3.5" />
             )}
-            {verifyingPopup ? 'Vérification en cours...' : 'Vérifier (petite fenêtre)'}
+            {verifyingPopup ? t('cf.verifying') : t('cf.openPopup')}
           </button>
           <button
             type="button"
@@ -121,10 +119,10 @@ export function CloudflareBanner({
               void openExternalTab(url);
             }}
             className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-1.5 text-xs font-medium text-amber-100 transition hover:bg-amber-500/20"
-            title="Ouvrir dans un onglet classique"
+            title={t('cf.openTabTitle')}
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            Onglet
+            {t('cf.openTab')}
           </button>
           {onRetry && (
             <button
@@ -136,13 +134,13 @@ export function CloudflareBanner({
               className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:bg-zinc-800"
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              Réessayer
+              {t('common.retry')}
             </button>
           )}
           <button
             type="button"
-            title="Fermer cette alerte"
-            aria-label="Fermer cette alerte"
+            title={t('cf.dismissAlert')}
+            aria-label={t('cf.dismissAlert')}
             onClick={() => {
               setWaitingUnlock(false);
               setDismissed(true);

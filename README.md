@@ -1,38 +1,182 @@
 # KumoYomi
 
-Extension navigateur PC **100 % locale** (Chrome, Brave, Edge et Firefox) agissant comme une coquille neutre : l'interface plein écran embarquée (`app.html`) héberge votre bibliothèque, la recherche parallèle multi-sources et un lecteur de scans anti-hotlink, tandis que les sites sont pilotés uniquement par des fichiers de configuration JSON hébergés dans un dépôt tiers séparé.
+**100% local, privacy-first manga aggregator and reader for desktop browsers (Firefox, Chrome, Brave, Edge).**
 
-## Téléchargement (Releases automatiques)
+KumoYomi runs entirely inside your browser as a full-tab MV3 extension (`app.html`). It acts as a **neutral reader shell** with zero hardcoded websites, zero accounts, zero tracking servers, and zero cloud sync:
 
-Les archives prêtes à l'emploi pour Chrome et Firefox sont publiées dans l'onglet **Releases** via le workflow GitHub Actions [`Build & Release Extension`](.github/workflows/release.yml) (déclenchable manuellement depuis l'onglet **Actions → Run workflow** ou via un tag `v*`).
+- Your **library, reading history, and offline chapters** are stored locally in IndexedDB (Dexie).
+- Reading sources are loaded externally via JSON configurations from third-party source repositories such as [`KumoYomi-Sources/extensions-source`](https://github.com/KumoYomi-Sources/extensions-source).
+- Built-in **4-language UI**: English (`en`), Français (`fr`), Español (`es`), and 中文 (`zh`), auto-detected from your browser locale and switchable at any time.
 
-## Développement & Compilation locale
+---
 
-```bash
-pnpm install
-pnpm test
-pnpm build          # Chrome / Brave / Edge MV3 -> .output/chrome-mv3
-pnpm build:firefox  # Firefox PC MV3            -> .output/firefox-mv3
-pnpm zip            # Génère les archives .zip dans .output/
+## Table of Contents
+
+- [Core Features](#core-features)
+- [Getting Started (Visual Guide)](#getting-started-visual-guide)
+- [Installation](#installation)
+- [Adding & Creating Sources (Human or AI)](#adding--creating-sources-human-or-ai)
+- [Project Architecture & Hierarchy](#project-architecture--hierarchy)
+- [Development & Build](#development--build)
+- [Contributing & Roadmap](#contributing--roadmap)
+
+---
+
+## Core Features
+
+- **Neutral JSON Parser Engine (`src/core/parser/`)**: Parses HTML (`DOMParser`), REST JSON APIs, and `json-html` endpoints without eval or remote executable code. Supports reusable inheritance templates (`origines`, `madara`, `mangathemesia`).
+- **Library & Automatic Migration**: Track reading statuses (`Reading`, `Plan to read`, `Completed`, `On hold`, `Dropped`), filter by source or unread counts, batch-mark chapters read/unread, and switch or merge series across multiple sources while preserving progress.
+- **Full-Screen Reader**:
+  - **Webtoon** (vertical continuous scroll with configurable width and gap), **Single Page**, and **Double Page** (open-book spread) modes.
+  - **Left-to-Right** and **Right-to-Left (Manga)** reading directions.
+  - Fit presets (`Fit screen`, `Full width`, `Original size`), configurable ahead-of-time page preloading (`0–15` pages), skeleton loading animations, and keyboard shortcuts (`←` / `→`, `Space`, `F`, `M`, `[` / `]`).
+- **100% Offline Chapter Storage**: Download single or unread chapters into IndexedDB and read with zero network requests.
+- **Anti-Hotlink & Cloudflare Session Assist**: Injects compliant per-domain `Referer`/`Origin` headers via MV3 `declarativeNetRequest`, falls back to open-tab fetch when session cookies are partitioned, and optionally opens a compact popup verification window that closes automatically once a site challenge is cleared by the user.
+- **Portable Local Backups**: Export and restore your full library, sources, and history as a JSON file (`Settings → Export backup`).
+
+---
+
+## Getting Started (Visual Guide)
+
+### 1. Load an External Source Repository
+KumoYomi starts completely empty. Open **Sources & Repos** from the sidebar and add a repository URL (for instance, `https://github.com/KumoYomi-Sources/extensions-source`) or import a standalone `.json` config.
+
+![Sources and Repositories](docs/screenshots/01-sources.png)
+
+### 2. Browse Catalogues & Multi-Source Search
+Switch to **Explore** to browse `Popular` / `Latest` catalogues per source or run a unified keyword search across every enabled source in parallel (`Ctrl + K` works from anywhere).
+
+![Explore and Search](docs/screenshots/02-explore.png)
+
+### 3. Manage Series Details & Offline Downloads
+Open any title to view metadata, genres, publication status, alternative sources (**Find other sources**), and chapter lists. Click **Add to library** and download individual or unread chapters for offline reading.
+
+![Manga Details and Offline Chapters](docs/screenshots/03-manga-detail.png)
+
+### 4. Customize the Full-Screen Reader
+Launch any chapter to read in **Webtoon**, **Single Page**, or **Double Page** mode. Expand **Reader options** in the top bar to adjust reading direction, page width, vertical spacing, or page preload buffer.
+
+![Full-Screen Manga Reader](docs/screenshots/04-reader.png)
+
+### 5. Track Your Library & Check Updates
+Filter your library by status (`All`, `Reading`, `Plan to read`, `Completed`, `On hold`), check for new chapters across all followed series on demand or in the background, and jump right back in.
+
+![My Library](docs/screenshots/05-library.png)
+
+### 6. Configure Languages, Verification & Backups
+Visit **Settings** to switch between **English**, **Français**, **Español**, and **中文 (简体)**, set global reader defaults, manage Cloudflare popup verification, and export/import local IndexedDB backups.
+
+![Settings and Multi-Language Selector](docs/screenshots/06-settings.png)
+
+---
+
+## Installation
+
+Pre-built extension archives are published on the [**GitHub Releases**](../../releases) page via [`release.yml`](.github/workflows/release.yml).
+
+### Firefox (Recommended Focus)
+
+1. **Temporary install (testing / development)**:
+   - Build locally (`pnpm build:firefox`) or download & extract the Firefox release archive.
+   - Open `about:debugging#/runtime/this-firefox`.
+   - Click **Load Temporary Add-on…** and select `.output/firefox-mv3/manifest.json` (or the downloaded `.zip`).
+   - *Note: Firefox Release removes temporary add-ons on browser restart; use Firefox Developer Edition/Nightly (`xpinstall.signatures.required = false`) or signed AMO `.xpi` packages for persistent installs.*
+2. **Signed distribution via Firefox Add-ons (AMO)**:
+   - See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ROADMAP.md](docs/ROADMAP.md#1-firefox-amo-store-readiness) for the exact reproducible build command (`pnpm install --frozen-lockfile && pnpm build:firefox`) and remaining store-listing steps.
+
+### Chrome / Brave / Edge
+
+1. Download and unzip `kumoyomi-<version>-chrome.zip` (or build locally with `pnpm build` -> `.output/chrome-mv3`).
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Click **Load unpacked** and select the extracted folder.
+
+---
+
+## Adding & Creating Sources (Human or AI)
+
+KumoYomi never hardcodes reading websites. All site definitions live in external JSON files — see the official community repository [`KumoYomi-Sources/extensions-source`](https://github.com/KumoYomi-Sources/extensions-source) or create your own repository.
+
+Read the complete specification in [**docs/ADDING_SOURCES.md**](docs/ADDING_SOURCES.md).
+
+### Quick Feasibility Matrix
+
+| Site Type | Difficulty | Notes |
+| --- | --- | --- |
+| Standard themes (`origines`, `madara`, `mangathemesia`) | **Easy** | Extend `_templates/<theme>.json` — often 10–30 lines of JSON. |
+| Clean SSR HTML or open REST/JSON APIs | **Easy / Medium** | Use CSS `FieldExtractor` selectors, `responseType: "json"`/`"json-html"`, or `numberedPages`. |
+| Sites behind Cloudflare / Hotlink protection | **Supported** | Works with `headers`, `warmupUrl`, MV3 DNR `Referer` injection, and user-cleared Cloudflare popup/tab proxy. |
+| Embedded `<script>` JSON blobs (`__NEXT_DATA__`), canvas image descrambling, or AES/HMAC token signing | **Hard / Unsupported** | Requires core parser extensions tracked in [docs/ROADMAP.md](docs/ROADMAP.md). |
+
+### Use an AI Coding Assistant to Add a Source
+
+You can ask an AI agent (with access to `curl`, DevTools, or a browser) to analyze a target manga site and generate a working KumoYomi JSON config + PR for [`KumoYomi-Sources/extensions-source`](https://github.com/KumoYomi-Sources/extensions-source). A ready-to-copy prompt and full schema checklist are included in [**docs/ADDING_SOURCES.md#ai-assisted-source-authoring**](docs/ADDING_SOURCES.md#ai-assisted-source-authoring).
+
+---
+
+## Project Architecture & Hierarchy
+
+```text
+KumoYomi/
+├── entrypoints/
+│   ├── app/                  # Full-tab React entry point (index.html, main.tsx, style.css)
+│   └── background.ts         # MV3 service worker (action tab, update alarm, DNR & tab proxy routing)
+├── public/icon/              # Extension icons (16, 32, 48, 128 px)
+├── src/
+│   ├── app/                  # App router (hash routes) & persistent sidebar layout (AppShell.tsx)
+│   ├── features/             # Domain pages:
+│   │   ├── library/          # Followed series, reading status tabs, local search & sorting
+│   │   ├── updates/          # Recent chapter feed across followed manga
+│   │   ├── explore/          # Parallel multi-source search & source catalogue browsing
+│   │   ├── manga-detail/     # Metadata, source switcher/migrator & chapter offline management
+│   │   ├── reader/           # Webtoon / Single / Double reader, preloader & keyboard shortcuts
+│   │   ├── sources/          # Repo sync, JSON import/paste & connection tester
+│   │   └── settings/         # Language selector, reader defaults, CF popup & JSON backup
+│   ├── components/           # Shared UI (AntiHotlinkImage, CloudflareBanner, UpdateCheckStatusBanner)
+│   └── core/                 # Browser-agnostic business & storage engine:
+│       ├── db/               # Dexie IndexedDB schema, reactive repository & JSON backup/restore
+│       ├── extension/        # MV3 bridges: DNR Referer rules, tab proxy, Cloudflare popup verification
+│       ├── i18n/             # Strongly-typed 4-language dictionaries (en, fr, es, zh)
+│       ├── image-loader/     # Priority fetch queue, hotlink bypass & IndexedDB cover/page blob cache
+│       ├── offline/          # Batch chapter downloader & storage cleaner
+│       ├── parser/           # Universal JSON/HTML parser, validator, date/chapter parsers & repo sync
+│       ├── types/            # Shared TypeScript contracts (SourceConfig, MangaEntity, AppSettings)
+│       └── updater/          # Background & manual favorite chapter update checker
+├── tools/
+│   ├── generate-icons.mjs    # PNG icon generator
+│   ├── mock-manga-servers.mjs# Local copyright-free Origines & Madara mock servers for testing/screenshots
+│   └── mihon-converter/      # Helper CLI converting simple Mihon theme extensions to JSON templates
+├── tests/                    # Vitest suite & JSON/template fixtures
+└── docs/                     # Source authoring guide, roadmap & UI screenshots
 ```
 
-### Charger dans Chrome / Brave / Edge
-1. Ouvrez `chrome://extensions`
-2. Activez le **Mode développeur**
-3. Cliquez sur **Charger l'extension non empaquetée** et sélectionnez `.output/chrome-mv3` (ou le contenu du `.zip` Chrome décompressé)
+---
 
-### Charger dans Firefox PC (Temporaire ou Signé via AMO)
-1. **Temporaire (développement)** : ouvrez `about:debugging#/runtime/this-firefox` → **Charger un module complémentaire temporaire…** → sélectionnez `.output/firefox-mv3/manifest.json` (ou `*-firefox.zip`). Note : Firefox Release supprime les extensions temporaires au redémarrage.
-2. **Permanent (Firefox Add-ons / AMO)** : soumettez l'archive `kumoyomi-<version>-firefox.zip` sur [addons.mozilla.org](https://addons.mozilla.org/developers/) (en *Unlisted / Self-distribution* pour un `.xpi` privé signé automatiquement, ou *Listed* pour le store public). Comme le bundle Vite est minifié, joignez l'archive source du dépôt et la commande de reproduction exacte :
-   ```bash
-   pnpm install --frozen-lockfile && pnpm build:firefox
-   ```
-   (Sortie vérifiable dans `.output/firefox-mv3`).
+## Development & Build
 
-## Ajouter un dépôt de sources
+**Prerequisites:** Node.js `>= 22`, `pnpm` (`>= 10` / `pnpm@11.15.1` via Corepack).
 
-L'extension démarre volontairement vide et ne contient aucun site en dur.
-1. Ouvrez KumoYomi (clic sur l'icône de l'extension) → onglet **Sources & Dépôts**.
-2. Ajoutez l'URL du dépôt communautaire de sources :
-   `https://github.com/KumoYomi-Sources/extensions-source`
-3. Pour proposer un nouveau site ou corriger un sélecteur, ouvrez une **Pull Request** sur [`KumoYomi-Sources/extensions-source`](https://github.com/KumoYomi-Sources/extensions-source).
+```bash
+# Install dependencies
+pnpm install
+
+# Type-check and run unit tests (Vitest + jsdom + fake-indexeddb)
+pnpm typecheck
+pnpm test
+
+# Run live UI preview against mock servers (no browser extension install needed for layout tests)
+node tools/mock-manga-servers.mjs --no-hotlink
+pnpm preview:web
+
+# Build browser bundles
+pnpm build:firefox   # -> .output/firefox-mv3
+pnpm build           # -> .output/chrome-mv3
+pnpm zip             # -> .output/*.zip (Chrome & Firefox)
+```
+
+---
+
+## Contributing & Roadmap
+
+- **Extension bugs, UI, i18n, and core engine PRs**: Read [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Adding or fixing manga website JSON configs**: Submit a Pull Request to [`KumoYomi-Sources/extensions-source`](https://github.com/KumoYomi-Sources/extensions-source) following [docs/ADDING_SOURCES.md](docs/ADDING_SOURCES.md).
+- **Planned features & store readiness status**: Check [docs/ROADMAP.md](docs/ROADMAP.md).

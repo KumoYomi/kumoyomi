@@ -187,12 +187,12 @@ async function downloadImageBlobOnce(imageUrl: string, refererUrl?: string): Pro
     response.status === 503 ||
     response.status === 504
   ) {
-    throw Object.assign(new Error(`HTTP ${response.status} temporaire sur l'image`), {
+    throw Object.assign(new Error(`Temporary HTTP ${response.status} on image`), {
       retryable: true,
     });
   }
 
-  throw new Error(`HTTP ${response.status} sur l'image`);
+  throw new Error(`HTTP ${response.status} on image`);
 }
 
 async function ensureReferer(imageUrl: string, refererUrl?: string): Promise<void> {
@@ -239,7 +239,7 @@ export async function fetchImageBlob(
 ): Promise<Blob> {
   const trimmed = imageUrl.trim();
   if (!trimmed) {
-    throw new Error("URL d'image vide.");
+    throw new Error('Empty image URL.');
   }
 
   await ensureReferer(trimmed, refererUrl);
@@ -266,7 +266,7 @@ export async function fetchImageBlob(
   });
 
   if (!blob || blob.size === 0) {
-    throw new Error('Image vide reçue');
+    throw new Error('Empty image received');
   }
   return blob;
 }
@@ -283,7 +283,7 @@ export async function fetchImageAsBlobUrl(
 ): Promise<string> {
   const trimmed = imageUrl.trim();
   if (!trimmed) {
-    throw new Error("URL d'image vide.");
+    throw new Error('Empty image URL.');
   }
   if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
     return trimmed;

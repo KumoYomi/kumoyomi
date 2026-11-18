@@ -11,8 +11,8 @@ export default defineConfig({
     name: 'KumoYomi',
     short_name: 'KumoYomi',
     description:
-      'Agrégateur et lecteur de mangas décentralisé 100% local piloté par des sources JSON externes.',
-    version: '0.2.0',
+      '100% local decentralized manga reader and aggregator powered by external JSON source repositories.',
+    version: '0.3.0',
     icons: {
       16: 'icon/16.png',
       32: 'icon/32.png',
@@ -20,7 +20,7 @@ export default defineConfig({
       128: 'icon/128.png',
     },
     action: {
-      default_title: 'Ouvrir KumoYomi',
+      default_title: 'Open KumoYomi',
       default_icon: {
         16: 'icon/16.png',
         32: 'icon/32.png',
