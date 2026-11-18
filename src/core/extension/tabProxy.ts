@@ -1,7 +1,8 @@
 import { browser } from 'wxt/browser';
-import type {
-  TabProxyFetchRequest,
-  TabProxyFetchResult,
+import {
+  getSiteRootDomain,
+  type TabProxyFetchRequest,
+  type TabProxyFetchResult,
 } from '@/src/core/extension/browserBridge';
 import { ensureCrossSubdomainCorsDnrRule } from '@/src/core/extension/dnrRules';
 
@@ -13,32 +14,10 @@ const CHALLENGE_TITLE_MARKERS = [
   'ddos-guard',
 ];
 
-const MULTI_PART_TLDS = new Set([
-  'co.uk',
-  'org.uk',
-  'co.jp',
-  'ne.jp',
-  'com.au',
-  'com.br',
-  'com.mx',
-  'com.tr',
-  'co.kr',
-]);
-
 function looksLikeChallengeTitle(title?: string): boolean {
   if (!title) return false;
   const lower = title.toLowerCase();
   return CHALLENGE_TITLE_MARKERS.some((m) => lower.includes(m));
-}
-
-function getSiteRoot(hostname: string): string {
-  const parts = hostname.toLowerCase().split('.').filter(Boolean);
-  if (parts.length <= 2) return parts.join('.');
-  const lastTwo = parts.slice(-2).join('.');
-  if (MULTI_PART_TLDS.has(lastTwo) && parts.length >= 3) {
-    return parts.slice(-3).join('.');
-  }
-  return lastTwo;
 }
 
 function matchTabToTarget(
@@ -55,12 +34,12 @@ function matchTabToTarget(
     }
 
     const tabHost = parsed.hostname.toLowerCase();
-    const targetRoot = getSiteRoot(targetHost);
-    const tabRoot = getSiteRoot(tabHost);
+    const targetRoot = getSiteRootDomain(targetHost);
+    const tabRoot = getSiteRootDomain(tabHost);
     if (
       tabRoot === targetRoot &&
       (!fallbackTabOrigin ||
-        getSiteRoot(new URL(fallbackTabOrigin).hostname) === targetRoot)
+        getSiteRootDomain(new URL(fallbackTabOrigin).hostname) === targetRoot)
     ) {
       return { exactOrigin: false, tabOrigin: parsed.origin };
     }
@@ -169,15 +148,28 @@ async function inPageFetchExecutor(params: {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), params.timeoutMs);
 
-  try {
-    const response = await fetch(params.url, {
+  const runFetch = (cacheMode: RequestCache) =>
+    fetch(params.url, {
       method: params.method,
       headers: cleanHeaders,
       body: params.body,
       credentials: 'include',
-      cache: params.isCrossOrigin ? 'no-store' : 'default',
+      cache: cacheMode,
       signal: controller.signal,
     });
+
+  try {
+    let response: Response;
+    try {
+      response = await runFetch('default');
+    } catch (firstErr) {
+      // Si Chrome avait mis en cache une réponse opaque sans CORS via <img>, retente avec reload
+      if (params.isCrossOrigin && firstErr instanceof TypeError) {
+        response = await runFetch('reload');
+      } else {
+        throw firstErr;
+      }
+    }
 
     const headersMap: Record<string, string> = {};
     response.headers.forEach((value, key) => {

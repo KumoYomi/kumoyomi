@@ -1,4 +1,4 @@
-import { ImageOff, RefreshCw } from 'lucide-react';
+import { ImageOff, Loader2, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { fetchImageAsBlobUrl } from '@/src/core/image-loader/blobImageLoader';
 
@@ -9,6 +9,8 @@ interface AntiHotlinkImageProps {
   alt: string;
   className?: string;
   placeholderClassName?: string;
+  loadingLabel?: string;
+  priority?: 'high' | 'normal';
   showRetry?: boolean;
   onImageLoad?: () => void;
 }
@@ -20,6 +22,8 @@ export function AntiHotlinkImage({
   alt,
   className = '',
   placeholderClassName,
+  loadingLabel,
+  priority = 'high',
   showRetry = false,
   onImageLoad,
 }: AntiHotlinkImageProps) {
@@ -27,6 +31,7 @@ export function AntiHotlinkImage({
   const [directFallback, setDirectFallback] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(Boolean(src));
   const [error, setError] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<number>(0);
 
   useEffect(() => {
@@ -36,21 +41,24 @@ export function AntiHotlinkImage({
       setDirectFallback(false);
       setLoading(false);
       setError(false);
+      setErrorMessage(null);
       return;
     }
 
     setLoading(true);
     setDirectFallback(false);
     setError(false);
+    setErrorMessage(null);
 
-    fetchImageAsBlobUrl(src, referer, scopeId)
+    fetchImageAsBlobUrl(src, referer, scopeId, { priority })
       .then((objectUrl) => {
         if (!active) return;
         setBlobSrc(objectUrl);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!active) return;
+        setErrorMessage(err instanceof Error ? err.message : null);
         // Dernier repli : balise <img> native (Sec-Fetch-Dest: image, mode no-cors + règle DNR Referer)
         setBlobSrc(null);
         setDirectFallback(true);
@@ -60,7 +68,7 @@ export function AntiHotlinkImage({
     return () => {
       active = false;
     };
-  }, [src, referer, scopeId, attempt]);
+  }, [src, referer, scopeId, priority, attempt]);
 
   const boxClass = placeholderClassName ?? className;
 
@@ -77,20 +85,36 @@ export function AntiHotlinkImage({
   if (loading) {
     return (
       <div
-        className={`animate-pulse bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-zinc-800/60 ${boxClass}`}
-      />
+        className={`relative flex flex-col items-center justify-center gap-3 overflow-hidden border border-zinc-800/70 bg-zinc-900/75 text-zinc-300 ${boxClass}`}
+      >
+        <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-zinc-800/40 via-zinc-900/20 to-rose-950/15" />
+        <Loader2 className="relative h-7 w-7 animate-spin text-rose-500" />
+        {loadingLabel && (
+          <span className="relative px-3 text-center text-xs font-medium text-zinc-300">
+            {loadingLabel}
+          </span>
+        )}
+      </div>
     );
   }
 
   const resolvedSrc = blobSrc ?? (directFallback ? src : null);
 
   if (error || !resolvedSrc) {
+    const isCfHint =
+      errorMessage?.toLowerCase().includes('cloudflare') || errorMessage?.includes('403');
     return (
       <div
-        className={`flex flex-col items-center justify-center gap-2 bg-zinc-900/90 p-3 text-center text-xs text-zinc-500 ${boxClass}`}
+        className={`flex flex-col items-center justify-center gap-2 border border-zinc-800/70 bg-zinc-900/90 p-4 text-center text-xs text-zinc-400 ${boxClass}`}
       >
-        <ImageOff className="h-6 w-6 text-zinc-600" />
+        <ImageOff className="h-6 w-6 text-zinc-500" />
         <span>Image bloquée ou indisponible</span>
+        {isCfHint && showRetry && (
+          <span className="max-w-xs text-[11px] text-amber-300/80">
+            Session Cloudflare expirée ? Rechargez l’onglet du site (F5) puis cliquez sur
+            Réessayer.
+          </span>
+        )}
         {showRetry && (
           <button
             type="button"

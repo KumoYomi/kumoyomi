@@ -142,6 +142,23 @@ export function SettingsPage() {
             className="w-full accent-rose-500"
           />
         </label>
+
+        <label className="block space-y-1.5 text-xs text-zinc-400">
+          <span>
+            Pages à précharger à l’avance ({currentSettings.preloadPagesCount ?? 4} page(s))
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={15}
+            step={1}
+            value={currentSettings.preloadPagesCount ?? 4}
+            onChange={(e) =>
+              void updateSettings({ preloadPagesCount: Number.parseInt(e.target.value, 10) })
+            }
+            className="w-full accent-rose-500"
+          />
+        </label>
       </section>
 
       {/* Mises à jour automatiques */}

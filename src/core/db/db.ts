@@ -24,6 +24,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   readingDirection: 'ltr',
   webtoonWidth: 820,
   doublePageOffset: true,
+  preloadPagesCount: 4,
   updateIntervalMinutes: 120,
 };
 
@@ -81,7 +82,7 @@ export const db = new KumoYomiDB();
 
 export async function getOrCreateSettings(): Promise<AppSettings> {
   const existing = await db.settings.get('default');
-  if (existing) return existing;
+  if (existing) return { ...DEFAULT_APP_SETTINGS, ...existing };
   await db.settings.put(DEFAULT_APP_SETTINGS);
   return DEFAULT_APP_SETTINGS;
 }

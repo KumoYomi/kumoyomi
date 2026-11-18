@@ -1,4 +1,10 @@
-import { requestTabProxyFetch } from '@/src/core/extension/browserBridge';
+import {
+  clearAllSiteTabProxyHints,
+  clearSiteTabProxied,
+  isSiteTabProxied,
+  markSiteTabProxied,
+  requestTabProxyFetch,
+} from '@/src/core/extension/browserBridge';
 import type { RequestConfig, SourceConfig } from '@/src/core/types/source';
 
 export class CloudflareChallengeError extends Error {
@@ -129,11 +135,8 @@ function interpolateUnknown(value: unknown, variables: TemplateVariables): unkno
   return value;
 }
 
-const TAB_PROXY_TTL_MS = 5 * 60 * 1000;
-const preferredTabProxyOrigins = new Map<string, number>();
-
 export function clearTabProxyCache(): void {
-  preferredTabProxyOrigins.clear();
+  clearAllSiteTabProxyHints();
 }
 
 export function isCloudflareResponse(status: number, headers: Headers, bodyText: string): boolean {
@@ -254,19 +257,16 @@ async function executeTimedFetch(
   source: SourceConfig,
   timeoutMs: number,
 ): Promise<{ response: TransportResponse; text: string }> {
-  const origin = new URL(url).origin;
-  const cachedUntil = preferredTabProxyOrigins.get(origin);
-  if (cachedUntil && cachedUntil > Date.now()) {
+  if (isSiteTabProxied(url)) {
     const proxied = await tryFetchViaOpenTab(url, init, source, timeoutMs);
     if (proxied) {
       if (isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
-        preferredTabProxyOrigins.delete(origin);
         throwCloudflareError(source, proxied.response.status, 'tab_blocked');
       }
-      preferredTabProxyOrigins.set(origin, Date.now() + TAB_PROXY_TTL_MS);
+      markSiteTabProxied(url);
       return proxied;
     }
-    preferredTabProxyOrigins.delete(origin);
+    clearSiteTabProxied(url);
   }
 
   const controller = new AbortController();
@@ -305,7 +305,7 @@ async function executeTimedFetch(
     // Repli automatique sur un onglet déjà ouvert et débloqué du même site (cookies partitionnés / Sec-Fetch-Site)
     const proxied = await tryFetchViaOpenTab(url, init, source, timeoutMs);
     if (proxied && !isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
-      preferredTabProxyOrigins.set(origin, Date.now() + TAB_PROXY_TTL_MS);
+      markSiteTabProxied(url);
       return proxied;
     }
     throwCloudflareError(

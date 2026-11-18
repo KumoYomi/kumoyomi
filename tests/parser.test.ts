@@ -588,7 +588,7 @@ describe('KumoYomi Universal Parser & Templates', () => {
     });
   });
 
-  it('récupère les images de sous-domaines CDN Cloudflare via l’onglet parent ouvert', async () => {
+  it('récupère les images de sous-domaines CDN Cloudflare via l’onglet parent ouvert et retente sur HTTP 429', async () => {
     const createObjectUrlSpy = vi
       .spyOn(URL, 'createObjectURL')
       .mockImplementation(() => `blob:test-image-${Math.random()}`);
@@ -604,15 +604,27 @@ describe('KumoYomi Universal Parser & Templates', () => {
     vi.stubGlobal('fetch', directFetch);
 
     const sampleBase64 = Buffer.from('fake-webp-bytes').toString('base64');
+    let attemptCount = 0;
     const proxyHandler = vi.fn(async (req) => {
       expect(req.fallbackTabOrigin).toBe('https://demo-origines.example');
       expect(req.responseMode).toBe('base64');
+      attemptCount += 1;
+      if (attemptCount === 2) {
+        return {
+          foundTab: true,
+          ok: false,
+          status: 429,
+          statusText: 'Too Many Requests',
+          headers: {} as Record<string, string>,
+          bodyText: 'rate limit',
+        };
+      }
       return {
         foundTab: true,
         ok: true,
         status: 200,
         statusText: 'OK',
-        headers: { 'content-type': 'image/webp' },
+        headers: { 'content-type': 'image/webp' } as Record<string, string>,
         bodyBase64: sampleBase64,
       };
     });
@@ -622,18 +634,20 @@ describe('KumoYomi Universal Parser & Templates', () => {
       'https://cdn.demo-origines.example/scans/01.webp',
       'https://demo-origines.example',
       'reader-test',
+      { priority: 'high' },
     );
     const blob2 = await fetchImageAsBlobUrl(
       'https://cdn.demo-origines.example/scans/02.webp',
       'https://demo-origines.example',
       'reader-test',
+      { priority: 'normal' },
     );
 
     const httpsCalls = directFetch.mock.calls.filter(([u]) => String(u).startsWith('https://'));
     expect(blob1.startsWith('blob:')).toBe(true);
     expect(blob2.startsWith('blob:')).toBe(true);
     expect(httpsCalls).toHaveLength(1);
-    expect(proxyHandler).toHaveBeenCalledTimes(2);
+    expect(proxyHandler).toHaveBeenCalledTimes(3);
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(2);
   });
 

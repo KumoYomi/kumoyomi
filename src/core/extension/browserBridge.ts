@@ -124,6 +124,57 @@ export function registerInProcessTabProxyHandler(
   inProcessTabProxyHandler = handler;
 }
 
+const MULTI_PART_TLDS = new Set([
+  'co.uk',
+  'org.uk',
+  'co.jp',
+  'ne.jp',
+  'com.au',
+  'com.br',
+  'com.mx',
+  'com.tr',
+  'co.kr',
+]);
+
+export function getSiteRootDomain(hostname: string): string {
+  const parts = hostname.toLowerCase().split('.').filter(Boolean);
+  if (parts.length <= 2) return parts.join('.');
+  const lastTwo = parts.slice(-2).join('.');
+  if (MULTI_PART_TLDS.has(lastTwo) && parts.length >= 3) {
+    return parts.slice(-3).join('.');
+  }
+  return lastTwo;
+}
+
+const tabProxiedRootDomains = new Set<string>();
+
+function extractSiteRootFromUrl(rawUrl: string): string | null {
+  try {
+    return getSiteRootDomain(new URL(rawUrl).hostname);
+  } catch {
+    return null;
+  }
+}
+
+export function markSiteTabProxied(rawUrl: string): void {
+  const root = extractSiteRootFromUrl(rawUrl);
+  if (root) tabProxiedRootDomains.add(root);
+}
+
+export function clearSiteTabProxied(rawUrl: string): void {
+  const root = extractSiteRootFromUrl(rawUrl);
+  if (root) tabProxiedRootDomains.delete(root);
+}
+
+export function isSiteTabProxied(rawUrl: string): boolean {
+  const root = extractSiteRootFromUrl(rawUrl);
+  return Boolean(root && tabProxiedRootDomains.has(root));
+}
+
+export function clearAllSiteTabProxyHints(): void {
+  tabProxiedRootDomains.clear();
+}
+
 export async function requestTabProxyFetch(
   request: TabProxyFetchRequest,
 ): Promise<TabProxyFetchResult | undefined> {

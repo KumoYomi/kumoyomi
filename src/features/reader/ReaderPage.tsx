@@ -83,12 +83,17 @@ function LazyWebtoonPage({
           referer={referer}
           scopeId={scopeId}
           alt={`Planche ${index + 1}`}
+          loadingLabel={`Chargement de la page ${index + 1}...`}
+          priority="high"
           showRetry
           placeholderClassName="mx-auto min-h-[65vh] w-full rounded-lg"
           className="mx-auto block w-full object-contain"
         />
       ) : (
-        <div className="mx-auto min-h-[65vh] w-full rounded-lg bg-zinc-900/40" />
+        <div className="mx-auto flex min-h-[65vh] w-full flex-col items-center justify-center gap-2 rounded-lg border border-zinc-900 bg-zinc-950/80 text-zinc-600">
+          <Loader2 className="h-5 w-5 animate-spin opacity-60" />
+          <span className="text-xs">Planche {index + 1}</span>
+        </div>
       )}
     </div>
   );
@@ -119,6 +124,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
   const [direction, setDirection] = useState<ReadingDirection>('ltr');
   const [webtoonWidth, setWebtoonWidth] = useState<number>(820);
   const [doubleOffset, setDoubleOffset] = useState<boolean>(true);
+  const [preloadCount, setPreloadCount] = useState<number>(DEFAULT_APP_SETTINGS.preloadPagesCount);
   const settingsInitializedRef = useRef(false);
 
   const [pages, setPages] = useState<ParsedPageItem[]>([]);
@@ -163,6 +169,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     setDirection(savedSettings.readingDirection);
     setWebtoonWidth(savedSettings.webtoonWidth);
     setDoubleOffset(savedSettings.doublePageOffset);
+    setPreloadCount(savedSettings.preloadPagesCount ?? DEFAULT_APP_SETTINGS.preloadPagesCount);
   }, [savedSettings]);
 
   // Libération explicite des URLs Blob en quittant le chapitre ou l'écran lecteur
@@ -269,14 +276,32 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     return idx >= 0 ? idx : 0;
   }, [spreads, currentPage]);
 
-  // Préchargement glissant des prochaines planches (Webtoon utilise LazyWebtoonPage)
+  // Préchargement ordonné et configurable des N prochaines planches (sans bloquer la page visible)
   useEffect(() => {
-    if (!source || pages.length === 0 || readerMode === 'webtoon') return;
-    const ahead = pages.slice(currentPage, currentPage + 4);
-    for (const p of ahead) {
-      void fetchImageAsBlobUrl(p.imageUrl, source.baseUrl, scopeId).catch(() => {});
-    }
-  }, [currentPage, pages, source, scopeId, readerMode]);
+    const baseUrl = sourceRef.current?.baseUrl;
+    if (!baseUrl || pages.length === 0 || preloadCount <= 0) return;
+
+    const currentLastIndex =
+      readerMode === 'double'
+        ? (spreads[currentSpreadIndex]?.at(-1)?.index ?? currentPage)
+        : currentPage;
+    const ahead = pages.slice(currentLastIndex + 1, currentLastIndex + 1 + preloadCount);
+    if (ahead.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      for (const p of ahead) {
+        if (cancelled) break;
+        await fetchImageAsBlobUrl(p.imageUrl, baseUrl, scopeId, { priority: 'normal' }).catch(
+          () => {},
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPage, currentSpreadIndex, spreads, pages, sourceId, scopeId, readerMode, preloadCount]);
 
   // Enregistrement automatique de la progression sans re-déclencher loadPages
   useEffect(() => {
@@ -474,6 +499,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
       readingDirection: ReadingDirection;
       webtoonWidth: number;
       doublePageOffset: boolean;
+      preloadPagesCount: number;
     }>,
   ) {
     const current = await getOrCreateSettings();
@@ -659,6 +685,23 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 </label>
               )}
 
+              <label className="flex items-center gap-3 text-zinc-400">
+                Préchargement ({preloadCount} p.)
+                <input
+                  type="range"
+                  min={0}
+                  max={15}
+                  step={1}
+                  value={preloadCount}
+                  onChange={(e) => {
+                    const count = Number.parseInt(e.target.value, 10);
+                    setPreloadCount(count);
+                    void persistReaderPref({ preloadPagesCount: count });
+                  }}
+                  className="accent-rose-500"
+                />
+              </label>
+
               <span className="text-zinc-500">
                 Raccourcis : ← / → ou Espace, F (Plein écran), M (Mode), [ / ] (Chapitre)
               </span>
@@ -764,6 +807,8 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 referer={source?.baseUrl}
                 scopeId={scopeId}
                 alt={`Planche ${currentPage + 1}`}
+                loadingLabel={`Chargement de la page ${currentPage + 1}...`}
+                priority="high"
                 showRetry
                 placeholderClassName="h-[68vh] w-[min(85vw,680px)] rounded-xl"
                 className="max-h-[calc(100vh-9.5rem)] max-w-full rounded object-contain shadow-2xl"
@@ -783,6 +828,8 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                     referer={source?.baseUrl}
                     scopeId={scopeId}
                     alt={`Planche ${p.index + 1}`}
+                    loadingLabel={`Chargement de la page ${p.index + 1}...`}
+                    priority="high"
                     showRetry
                     placeholderClassName="h-[68vh] w-[42vw] max-w-[540px] rounded-xl"
                     className="max-h-[calc(100vh-9.5rem)] max-w-[45vw] w-auto rounded object-contain shadow-2xl"

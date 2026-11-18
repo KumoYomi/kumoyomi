@@ -102,6 +102,7 @@ export interface AppSettings {
   readingDirection: ReadingDirection;
   webtoonWidth: number;
   doublePageOffset: boolean;
+  preloadPagesCount: number;
   updateIntervalMinutes: number;
   lastGlobalUpdateCheck?: number;
 }

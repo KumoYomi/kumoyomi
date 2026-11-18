@@ -1,5 +1,9 @@
 import { db } from '@/src/core/db/db';
 import {
+  clearAllSiteTabProxyHints,
+  clearSiteTabProxied,
+  isSiteTabProxied,
+  markSiteTabProxied,
   requestTabProxyFetch,
   sendBackgroundMessage,
 } from '@/src/core/extension/browserBridge';
@@ -8,19 +12,37 @@ import { isCloudflareResponse } from '@/src/core/parser/httpClient';
 const scopeUrls = new Map<string, Map<string, string>>();
 const inflightRequests = new Map<string, Promise<string>>();
 const ensuredRefererPairs = new Set<string>();
-const preferredImageProxyHosts = new Map<string, number>();
 
 const MAX_COVER_CACHE_ENTRIES = 160;
-const IMAGE_PROXY_TTL_MS = 5 * 60 * 1000;
-const MAX_CONCURRENT_IMAGE_FETCHES = 3;
+const MAX_CONCURRENT_IMAGE_FETCHES = 2;
+
+export type ImageFetchPriority = 'high' | 'normal';
+
+interface QueueWaiter {
+  priority: ImageFetchPriority;
+  run: () => void;
+}
 
 let activeImageFetches = 0;
-const imageFetchWaiters: Array<() => void> = [];
+const imageFetchWaiters: QueueWaiter[] = [];
 
-async function withImageConcurrency<T>(task: () => Promise<T>): Promise<T> {
+async function withImageConcurrency<T>(
+  priority: ImageFetchPriority,
+  task: () => Promise<T>,
+): Promise<T> {
   if (activeImageFetches >= MAX_CONCURRENT_IMAGE_FETCHES) {
     await new Promise<void>((resolve) => {
-      imageFetchWaiters.push(resolve);
+      const waiter: QueueWaiter = { priority, run: resolve };
+      if (priority === 'high') {
+        const firstNormalIdx = imageFetchWaiters.findIndex((w) => w.priority !== 'high');
+        if (firstNormalIdx === -1) {
+          imageFetchWaiters.push(waiter);
+        } else {
+          imageFetchWaiters.splice(firstNormalIdx, 0, waiter);
+        }
+      } else {
+        imageFetchWaiters.push(waiter);
+      }
     });
   }
   activeImageFetches += 1;
@@ -29,12 +51,12 @@ async function withImageConcurrency<T>(task: () => Promise<T>): Promise<T> {
   } finally {
     activeImageFetches -= 1;
     const next = imageFetchWaiters.shift();
-    if (next) next();
+    if (next) next.run();
   }
 }
 
 export function clearImageProxyCache(): void {
-  preferredImageProxyHosts.clear();
+  clearAllSiteTabProxyHints();
 }
 
 function safeOrigin(url?: string): string | undefined {
@@ -46,12 +68,8 @@ function safeOrigin(url?: string): string | undefined {
   }
 }
 
-function safeHost(url: string): string {
-  try {
-    return new URL(url).host.toLowerCase();
-  } catch {
-    return '';
-  }
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function decodeBase64ToBlob(base64: string, contentType?: string): Promise<Blob> {
@@ -72,17 +90,109 @@ async function decodeBase64ToBlob(base64: string, contentType?: string): Promise
   return new Blob([bytes], { type: mime });
 }
 
-async function tryFetchImageViaTab(imageUrl: string, refererUrl?: string): Promise<Blob | null> {
+type TabImageResult =
+  | { kind: 'blob'; blob: Blob }
+  | { kind: 'cloudflare'; status: number }
+  | { kind: 'retryable'; status: number }
+  | { kind: 'error'; status: number }
+  | { kind: 'no_tab' };
+
+async function tryFetchImageViaTab(
+  imageUrl: string,
+  refererUrl?: string,
+): Promise<TabImageResult> {
   const proxied = await requestTabProxyFetch({
     url: imageUrl,
     method: 'GET',
     responseMode: 'base64',
     fallbackTabOrigin: safeOrigin(refererUrl),
   });
-  if (proxied?.foundTab && proxied.ok && proxied.bodyBase64) {
-    return decodeBase64ToBlob(proxied.bodyBase64, proxied.headers?.['content-type']);
+  if (!proxied?.foundTab) {
+    return { kind: 'no_tab' };
   }
-  return null;
+  if (proxied.ok && proxied.bodyBase64) {
+    const blob = await decodeBase64ToBlob(proxied.bodyBase64, proxied.headers?.['content-type']);
+    return { kind: 'blob', blob };
+  }
+  const status = proxied.status ?? 0;
+  const headers = new Headers(proxied.headers ?? {});
+  if (isCloudflareResponse(status, headers, proxied.bodyText ?? '')) {
+    return { kind: 'cloudflare', status };
+  }
+  if (status === 429 || status === 502 || status === 503 || status === 504 || proxied.error) {
+    return { kind: 'retryable', status };
+  }
+  return { kind: 'error', status };
+}
+
+async function downloadImageBlobOnce(imageUrl: string, refererUrl?: string): Promise<Blob> {
+  const useTabFirst =
+    isSiteTabProxied(imageUrl) || (refererUrl ? isSiteTabProxied(refererUrl) : false);
+
+  if (useTabFirst) {
+    const tabRes = await tryFetchImageViaTab(imageUrl, refererUrl);
+    if (tabRes.kind === 'blob') {
+      markSiteTabProxied(imageUrl);
+      return tabRes.blob;
+    }
+    if (tabRes.kind === 'cloudflare') {
+      throw new Error(`Cloudflare HTTP ${tabRes.status} sur l'image`);
+    }
+    if (tabRes.kind === 'retryable') {
+      throw Object.assign(new Error(`HTTP ${tabRes.status} temporaire sur l'image`), {
+        retryable: true,
+      });
+    }
+    if (tabRes.kind === 'error') {
+      throw new Error(`HTTP ${tabRes.status} sur l'image`);
+    }
+    // Onglet fermé : on efface le hint et on retente en direct
+    clearSiteTabProxied(imageUrl);
+  }
+
+  const response = await fetch(imageUrl, { credentials: 'include' });
+  if (response.ok) {
+    return response.blob();
+  }
+
+  let cfDetected = response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge';
+  if (
+    !cfDetected &&
+    (response.status === 403 || response.status === 503 || response.status === 429)
+  ) {
+    const errText = await response.text().catch(() => '');
+    cfDetected = isCloudflareResponse(response.status, response.headers, errText);
+  }
+
+  if (cfDetected) {
+    const tabRes = await tryFetchImageViaTab(imageUrl, refererUrl);
+    if (tabRes.kind === 'blob') {
+      markSiteTabProxied(imageUrl);
+      return tabRes.blob;
+    }
+    if (tabRes.kind === 'cloudflare') {
+      throw new Error(`Cloudflare HTTP ${tabRes.status} sur l'image`);
+    }
+    if (tabRes.kind === 'retryable') {
+      throw Object.assign(new Error(`HTTP ${tabRes.status} temporaire sur l'image`), {
+        retryable: true,
+      });
+    }
+    throw new Error(`Cloudflare HTTP ${response.status} sur l'image`);
+  }
+
+  if (
+    response.status === 429 ||
+    response.status === 502 ||
+    response.status === 503 ||
+    response.status === 504
+  ) {
+    throw Object.assign(new Error(`HTTP ${response.status} temporaire sur l'image`), {
+      retryable: true,
+    });
+  }
+
+  throw new Error(`HTTP ${response.status} sur l'image`);
 }
 
 async function ensureReferer(imageUrl: string, refererUrl?: string): Promise<void> {
@@ -126,6 +236,7 @@ export async function fetchImageAsBlobUrl(
   imageUrl: string,
   refererUrl?: string,
   scopeId = 'covers',
+  options?: { priority?: ImageFetchPriority },
 ): Promise<string> {
   const trimmed = imageUrl.trim();
   if (!trimmed) {
@@ -146,6 +257,7 @@ export async function fetchImageAsBlobUrl(
     return existingInflight;
   }
 
+  const priority = options?.priority ?? 'high';
   const task = (async () => {
     try {
       if (scopeId === 'covers') {
@@ -159,45 +271,25 @@ export async function fetchImageAsBlobUrl(
 
       await ensureReferer(trimmed, refererUrl);
 
-      const blob = await withImageConcurrency(async () => {
-        const imgHost = safeHost(trimmed);
-        const cachedProxyUntil = imgHost ? preferredImageProxyHosts.get(imgHost) : undefined;
-
-        if (cachedProxyUntil && cachedProxyUntil > Date.now()) {
-          const proxiedBlob = await tryFetchImageViaTab(trimmed, refererUrl);
-          if (proxiedBlob) {
-            preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
-            return proxiedBlob;
-          }
-          preferredImageProxyHosts.delete(imgHost);
-        }
-
-        const response = await fetch(trimmed, {
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          let cfDetected = response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge';
-          if (
-            !cfDetected &&
-            (response.status === 403 || response.status === 503 || response.status === 429)
-          ) {
-            const errText = await response.text().catch(() => '');
-            cfDetected = isCloudflareResponse(response.status, response.headers, errText);
-          }
-          if (cfDetected) {
-            const proxiedBlob = await tryFetchImageViaTab(trimmed, refererUrl);
-            if (proxiedBlob) {
-              if (imgHost) {
-                preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
-              }
-              return proxiedBlob;
+      const blob = await withImageConcurrency(priority, async () => {
+        const backoffs = [0, 500, 1200];
+        let lastErr: unknown;
+        for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
+          const wait = backoffs[attempt] ?? 0;
+          if (wait > 0) await delayMs(wait);
+          try {
+            return await downloadImageBlobOnce(trimmed, refererUrl);
+          } catch (err) {
+            lastErr = err;
+            const retryable = Boolean(
+              err && typeof err === 'object' && 'retryable' in err && (err as { retryable?: boolean }).retryable,
+            );
+            if (!retryable || attempt === backoffs.length - 1) {
+              throw err;
             }
           }
-          throw new Error(`HTTP ${response.status} sur l'image`);
         }
-
-        return response.blob();
+        throw lastErr;
       });
 
       if (!blob || blob.size === 0) {
