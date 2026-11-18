@@ -4,6 +4,27 @@ export type LibraryStatus = 'reading' | 'plan_to_read' | 'completed' | 'on_hold'
 
 export type ReaderMode = 'webtoon' | 'single' | 'double';
 export type ReadingDirection = 'ltr' | 'rtl';
+export type PageFitMode = 'contain' | 'width' | 'original';
+
+export interface OfflineChapterMeta {
+  chapterId: string;
+  mangaId: string;
+  sourceId: string;
+  chapterTitle: string;
+  pageCount: number;
+  totalBytes: number;
+  cachedAt: number;
+}
+
+export interface OfflinePageBlob {
+  /** Clé composite `${chapterId}:${pageIndex}` */
+  id: string;
+  chapterId: string;
+  pageIndex: number;
+  imageUrl: string;
+  mimeType: string;
+  blob: Blob;
+}
 
 export interface RepositoryRecord {
   id: string;
@@ -100,10 +121,13 @@ export interface AppSettings {
   id: 'default';
   readerMode: ReaderMode;
   readingDirection: ReadingDirection;
+  pageFitMode?: PageFitMode;
   webtoonWidth: number;
+  webtoonGap?: number;
   doublePageOffset: boolean;
   preloadPagesCount: number;
   updateIntervalMinutes: number;
+  autoOpenCloudflarePopup?: boolean;
   lastGlobalUpdateCheck?: number;
 }
 

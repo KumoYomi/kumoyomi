@@ -102,6 +102,29 @@ export async function requestOriginPermission(baseUrl: string): Promise<boolean>
   }
 }
 
+export interface CloudflarePopupResult {
+  unlocked: boolean;
+  cancelled?: boolean;
+  mode?: 'direct' | 'pinned_tab' | 'minimized' | 'external_tab';
+}
+
+export async function requestCloudflareVerificationPopup(
+  siteUrl: string,
+  options?: { probeUrl?: string; autoTriggered?: boolean },
+): Promise<CloudflarePopupResult> {
+  const api = getApi();
+  if (api !== null) {
+    try {
+      const { openCloudflareVerificationPopup } = await import('@/src/core/extension/cfPopup');
+      return await openCloudflareVerificationPopup(siteUrl, options);
+    } catch {
+      // Repli sur l'ouverture d'onglet si le module fenêtre est indisponible
+    }
+  }
+  await openExternalTab(siteUrl);
+  return { unlocked: false, mode: 'external_tab' };
+}
+
 export async function openExternalTab(url: string): Promise<void> {
   const api = getApi();
   if (api?.tabs) {

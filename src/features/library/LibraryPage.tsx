@@ -1,13 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { BookMarked, Compass, Loader2, RefreshCw, Search } from 'lucide-react';
+import { BookMarked, Compass, Loader2, Play, RefreshCw, Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
-import { CloudflareBanner } from '@/src/components/CloudflareBanner';
+import { UpdateCheckStatusBanner } from '@/src/components/UpdateCheckStatusBanner';
 import { db } from '@/src/core/db/db';
 import type { UpdateCheckSummary } from '@/src/core/extension/browserBridge';
-import type { LibraryStatus } from '@/src/core/types/manga';
+import type { LibraryStatus, MangaEntity } from '@/src/core/types/manga';
 import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
+
+type LibrarySortKey = 'updated' | 'title' | 'unread' | 'added';
 
 const FILTER_TABS: Array<{ key: 'all' | LibraryStatus; label: string }> = [
   { key: 'all', label: 'Tous' },
@@ -15,6 +17,7 @@ const FILTER_TABS: Array<{ key: 'all' | LibraryStatus; label: string }> = [
   { key: 'plan_to_read', label: 'À lire' },
   { key: 'completed', label: 'Terminés' },
   { key: 'on_hold', label: 'En pause' },
+  { key: 'dropped', label: 'Abandonnés' },
 ];
 
 export function LibraryPage() {
@@ -33,6 +36,8 @@ export function LibraryPage() {
   const sourceById = useMemo(() => new Map(allSources.map((s) => [s.id, s])), [allSources]);
 
   const [statusFilter, setStatusFilter] = useState<'all' | LibraryStatus>('all');
+  const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<LibrarySortKey>('updated');
   const [titleQuery, setTitleQuery] = useState('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [checkProgress, setCheckProgress] = useState<{
@@ -42,16 +47,58 @@ export function LibraryPage() {
   } | null>(null);
   const [updateSummary, setUpdateSummary] = useState<UpdateCheckSummary | null>(null);
 
+  const tabCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: favorites.length };
+    for (const m of favorites) {
+      counts[m.libraryStatus] = (counts[m.libraryStatus] ?? 0) + 1;
+    }
+    return counts;
+  }, [favorites]);
+
   const visibleMangas = useMemo(() => {
-    return favorites.filter((m) => {
+    const filtered = favorites.filter((m) => {
       if (statusFilter !== 'all' && m.libraryStatus !== statusFilter) return false;
+      if (sourceFilter !== 'all' && m.preferredSourceId !== sourceFilter) return false;
       if (titleQuery.trim()) {
         const q = titleQuery.trim().toLowerCase();
         return m.title.toLowerCase().includes(q);
       }
       return true;
     });
-  }, [favorites, statusFilter, titleQuery]);
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === 'title') return a.title.localeCompare(b.title, 'fr');
+      if (sortBy === 'unread') {
+        if (b.unreadCount !== a.unreadCount) return b.unreadCount - a.unreadCount;
+        return b.updatedAt - a.updatedAt;
+      }
+      if (sortBy === 'added') return b.addedAt - a.addedAt;
+      return b.updatedAt - a.updatedAt;
+    });
+  }, [favorites, statusFilter, sourceFilter, sortBy, titleQuery]);
+
+  async function handleQuickReadManga(manga: MangaEntity) {
+    const sourceId = manga.preferredSourceId;
+    if (!sourceId) {
+      navigate({ name: 'manga', mangaId: manga.id });
+      return;
+    }
+    const chapters = await db.chapters
+      .where('[mangaId+sourceId]')
+      .equals([manga.id, sourceId])
+      .toArray();
+    if (chapters.length === 0) {
+      navigate({ name: 'manga', mangaId: manga.id });
+      return;
+    }
+    const ascending = [...chapters].sort((a, b) => b.orderIndex - a.orderIndex);
+    const target = ascending.find((c) => !c.read) ?? ascending[ascending.length - 1];
+    if (target) {
+      navigate({ name: 'reader', mangaId: manga.id, chapterId: target.id });
+    } else {
+      navigate({ name: 'manga', mangaId: manga.id });
+    }
+  }
 
   async function handleCheckAllUpdates() {
     setCheckingUpdates(true);
@@ -78,7 +125,7 @@ export function LibraryPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
             <input
@@ -89,6 +136,34 @@ export function LibraryPage() {
               className="rounded-xl border border-zinc-800 bg-[#12121a] py-2 pl-9 pr-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
             />
           </div>
+
+          {allSources.length > 1 && (
+            <select
+              aria-label="Filtrer par source"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="rounded-xl border border-zinc-800 bg-[#12121a] px-3 py-2 text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
+            >
+              <option value="all">Toutes sources</option>
+              {allSources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <select
+            aria-label="Trier la bibliothèque"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as LibrarySortKey)}
+            className="rounded-xl border border-zinc-800 bg-[#12121a] px-3 py-2 text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
+          >
+            <option value="updated">Dernière mise à jour</option>
+            <option value="unread">Chapitres non lus</option>
+            <option value="title">Alphabétique (A→Z)</option>
+            <option value="added">Date d&apos;ajout</option>
+          </select>
 
           <button
             type="button"
@@ -108,52 +183,35 @@ export function LibraryPage() {
 
       {/* Onglets de statut */}
       <div className="flex flex-wrap gap-1.5 border-b border-zinc-800/80 pb-3">
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => setStatusFilter(tab.key)}
-            className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold transition ${
-              statusFilter === tab.key
-                ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
-                : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {FILTER_TABS.map((tab) => {
+          const count = tabCounts[tab.key] ?? 0;
+          if (tab.key === 'dropped' && count === 0 && statusFilter !== 'dropped') return null;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setStatusFilter(tab.key)}
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition ${
+                statusFilter === tab.key
+                  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
+                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+              }`}
+            >
+              <span>{tab.label}</span>
+              <span className="rounded bg-zinc-900/90 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400">
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      {checkProgress && (
-        <div className="rounded-xl border border-zinc-800 bg-[#12121a] px-4 py-3 text-xs text-zinc-300">
-          Vérification ({checkProgress.current}/{checkProgress.total}) :{' '}
-          <strong className="text-white">{checkProgress.title}</strong>
-        </div>
-      )}
-
-      {updateSummary && (
-        <div className="space-y-3">
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-200">
-            Vérification terminée : {updateSummary.checkedMangas} série(s) vérifiée(s),{' '}
-            <strong>{updateSummary.newChaptersCount} nouveau(x) chapitre(s)</strong> détecté(s).
-          </div>
-          {updateSummary.errors
-            .filter((e) => e.isCloudflare)
-            .map((e) => {
-              const src = sourceById.get(e.sourceId);
-              if (!src) return null;
-              return (
-                <CloudflareBanner
-                  key={`${e.sourceId}-${e.mangaTitle}`}
-                  sourceName={src.name}
-                  url={src.baseUrl}
-                  compact
-                  onRetry={() => void handleCheckAllUpdates()}
-                />
-              );
-            })}
-        </div>
-      )}
+      <UpdateCheckStatusBanner
+        progress={checkProgress}
+        summary={updateSummary}
+        sourceById={sourceById}
+        onRetry={() => void handleCheckAllUpdates()}
+      />
 
       {favorites.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-zinc-800 bg-[#111118] p-14 text-center">
@@ -181,6 +239,10 @@ export function LibraryPage() {
             </button>
           </div>
         </div>
+      ) : visibleMangas.length === 0 ? (
+        <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-10 text-center text-sm text-zinc-400">
+          Aucune série ne correspond à vos filtres.
+        </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
           {visibleMangas.map((manga) => {
@@ -188,36 +250,48 @@ export function LibraryPage() {
               ? sourceById.get(manga.preferredSourceId)
               : undefined;
             return (
-              <button
+              <div
                 key={manga.id}
-                type="button"
-                onClick={() => navigate({ name: 'manga', mangaId: manga.id })}
-                className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#12121a] text-left transition hover:-translate-y-0.5 hover:border-rose-500/50"
+                className="group relative flex flex-col overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#12121a] transition hover:-translate-y-0.5 hover:border-rose-500/50"
               >
-                <div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-900">
-                  <AntiHotlinkImage
-                    src={manga.coverUrl}
-                    referer={preferredSrc?.baseUrl}
-                    alt={manga.title}
-                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                  />
-                  {manga.unreadCount > 0 && (
-                    <span className="absolute right-2 top-2 rounded-lg bg-rose-600 px-2 py-0.5 text-xs font-bold text-white shadow">
-                      {manga.unreadCount}
-                    </span>
-                  )}
-                  {preferredSrc && (
-                    <span className="absolute bottom-2 left-2 rounded-md bg-zinc-950/85 px-2 py-0.5 text-[10px] font-medium text-zinc-300 backdrop-blur">
-                      {preferredSrc.name}
-                    </span>
-                  )}
-                </div>
-                <div className="p-3">
-                  <h3 className="line-clamp-2 text-sm font-semibold text-zinc-100 group-hover:text-rose-300">
-                    {manga.title}
-                  </h3>
-                </div>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => navigate({ name: 'manga', mangaId: manga.id })}
+                  className="flex flex-1 flex-col text-left"
+                >
+                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-900">
+                    <AntiHotlinkImage
+                      src={manga.coverUrl}
+                      referer={preferredSrc?.baseUrl}
+                      alt={manga.title}
+                      className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    />
+                    {manga.unreadCount > 0 && (
+                      <span className="absolute right-2 top-2 rounded-lg bg-rose-600 px-2 py-0.5 text-xs font-bold text-white shadow">
+                        {manga.unreadCount}
+                      </span>
+                    )}
+                    {preferredSrc && (
+                      <span className="absolute bottom-2 left-2 rounded-md bg-zinc-950/85 px-2 py-0.5 text-[10px] font-medium text-zinc-300 backdrop-blur">
+                        {preferredSrc.name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <h3 className="line-clamp-2 text-sm font-semibold text-zinc-100 group-hover:text-rose-300">
+                      {manga.title}
+                    </h3>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  title="Reprendre la lecture"
+                  onClick={() => void handleQuickReadManga(manga)}
+                  className="absolute bottom-14 right-2 rounded-xl bg-rose-600 p-2 text-white opacity-0 shadow-lg transition hover:bg-rose-500 group-hover:opacity-100"
+                >
+                  <Play className="h-3.5 w-3.5 fill-current" />
+                </button>
+              </div>
             );
           })}
         </div>

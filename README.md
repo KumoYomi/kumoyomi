@@ -21,10 +21,13 @@ pnpm zip            # Génère les archives .zip dans .output/
 2. Activez le **Mode développeur**
 3. Cliquez sur **Charger l'extension non empaquetée** et sélectionnez `.output/chrome-mv3` (ou le contenu du `.zip` Chrome décompressé)
 
-### Charger dans Firefox PC
-1. Ouvrez `about:debugging#/runtime/this-firefox`
-2. Cliquez sur **Charger un module complémentaire temporaire…**
-3. Sélectionnez `.output/firefox-mv3/manifest.json` (ou directement l'archive `*-firefox.zip`)
+### Charger dans Firefox PC (Temporaire ou Signé via AMO)
+1. **Temporaire (développement)** : ouvrez `about:debugging#/runtime/this-firefox` → **Charger un module complémentaire temporaire…** → sélectionnez `.output/firefox-mv3/manifest.json` (ou `*-firefox.zip`). Note : Firefox Release supprime les extensions temporaires au redémarrage.
+2. **Permanent (Firefox Add-ons / AMO)** : soumettez l'archive `kumoyomi-<version>-firefox.zip` sur [addons.mozilla.org](https://addons.mozilla.org/developers/) (en *Unlisted / Self-distribution* pour un `.xpi` privé signé automatiquement, ou *Listed* pour le store public). Comme le bundle Vite est minifié, joignez l'archive source du dépôt et la commande de reproduction exacte :
+   ```bash
+   pnpm install --frozen-lockfile && pnpm build:firefox
+   ```
+   (Sortie vérifiable dans `.output/firefox-mv3`).
 
 ## Ajouter un dépôt de sources
 

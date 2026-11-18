@@ -5,14 +5,17 @@ import {
   BookOpen,
   Check,
   CheckCheck,
+  Download,
   Eye,
   EyeOff,
+  HardDrive,
   Heart,
   Layers,
   Loader2,
   Play,
   RefreshCw,
   Search,
+  Trash2,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { navigate } from '@/src/app/router';
@@ -27,9 +30,15 @@ import {
   toggleFavoriteManga,
   upsertMangaFromCatalogueItem,
 } from '@/src/core/db/mangaRepository';
+import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
+import {
+  downloadChapterOffline,
+  formatBytes,
+  removeOfflineChapter,
+} from '@/src/core/offline/offlineCache';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
-import type { LibraryStatus } from '@/src/core/types/manga';
+import type { ChapterEntity, LibraryStatus } from '@/src/core/types/manga';
 
 const STATUS_LABELS: Record<string, string> = {
   ongoing: 'En cours',
@@ -72,35 +81,64 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
   const activeSource = activeSourceId ? sourceMap.get(activeSourceId) : undefined;
   const activeLink = links.find((l) => l.sourceId === activeSourceId);
 
+  const offlineEntries =
+    useLiveQuery(
+      () => db.offlineChapters.where('mangaId').equals(mangaId).toArray(),
+      [mangaId],
+      [],
+    ) ?? [];
+  const offlineByChapterId = useMemo(
+    () => new Map(offlineEntries.map((o) => [o.chapterId, o])),
+    [offlineEntries],
+  );
+
   const [syncing, setSyncing] = useState(false);
   const [matchingOtherSources, setMatchingOtherSources] = useState(false);
   const [syncError, setSyncError] = useState<
-    { kind: 'cloudflare'; url: string } | { kind: 'error'; message: string } | null
+    | { kind: 'cloudflare'; url: string; probeUrl?: string }
+    | { kind: 'error'; message: string }
+    | null
   >(null);
   const [chapterQuery, setChapterQuery] = useState('');
+  const [onlyUnread, setOnlyUnread] = useState(false);
   const [sortDesc, setSortDesc] = useState(true);
+  const [downloadingProgress, setDownloadingProgress] = useState<
+    Record<string, { done: number; total: number }>
+  >({});
+  const [batchDownloading, setBatchDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const batchAbortRef = useRef<AbortController | null>(null);
   const autoFetchedKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    return () => {
+      batchAbortRef.current?.abort();
+    };
+  }, []);
 
   async function refreshFromActiveSource() {
     if (!activeSource || !activeLink) return;
     setSyncing(true);
     setSyncError(null);
     try {
-      const details = await parserEngine.getMangaDetails(
-        activeSource.resolvedConfig,
-        activeLink.sourceMangaUrl,
-      );
+      const { details, parsedChapters } = await runWithAutoCloudflarePopup(async () => {
+        const fetchedDetails = await parserEngine.getMangaDetails(
+          activeSource.resolvedConfig,
+          activeLink.sourceMangaUrl,
+        );
+        const fetchedChapters = await parserEngine.getChapters(
+          activeSource.resolvedConfig,
+          fetchedDetails.url || activeLink.sourceMangaUrl,
+          fetchedDetails.rawHtml,
+          fetchedDetails.rawJson,
+        );
+        return { details: fetchedDetails, parsedChapters: fetchedChapters };
+      });
       await saveMangaDetails(mangaId, activeSource.id, details);
-      const parsedChapters = await parserEngine.getChapters(
-        activeSource.resolvedConfig,
-        details.url || activeLink.sourceMangaUrl,
-        details.rawHtml,
-        details.rawJson,
-      );
       await syncSourceChapters(mangaId, activeSource.id, parsedChapters);
     } catch (err) {
       if (err instanceof CloudflareChallengeError) {
-        setSyncError({ kind: 'cloudflare', url: err.url });
+        setSyncError({ kind: 'cloudflare', url: err.url, probeUrl: err.requestUrl });
       } else {
         setSyncError({
           kind: 'error',
@@ -109,6 +147,66 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
       }
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleDownloadSingleChapter(chapter: ChapterEntity, signal?: AbortSignal) {
+    if (!activeSource) return;
+    setDownloadError(null);
+    setDownloadingProgress((prev) => ({ ...prev, [chapter.id]: { done: 0, total: 0 } }));
+    try {
+      await runWithAutoCloudflarePopup(() =>
+        downloadChapterOffline(
+          chapter,
+          activeSource,
+          (prog) => {
+            setDownloadingProgress((prev) => ({
+              ...prev,
+              [chapter.id]: { done: prog.completedPages, total: prog.totalPages },
+            }));
+          },
+          signal,
+        ),
+      );
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      if (err instanceof CloudflareChallengeError) {
+        setSyncError({ kind: 'cloudflare', url: err.url, probeUrl: err.requestUrl });
+      } else {
+        setDownloadError(
+          err instanceof Error ? err.message : 'Échec du téléchargement hors-ligne.',
+        );
+      }
+    } finally {
+      setDownloadingProgress((prev) => {
+        const next = { ...prev };
+        delete next[chapter.id];
+        return next;
+      });
+    }
+  }
+
+  async function handleDownloadUnreadChapters() {
+    if (!activeSource || batchDownloading) return;
+    const targets = [...chapters]
+      .sort((a, b) => b.orderIndex - a.orderIndex)
+      .filter((c) => !c.read && !offlineByChapterId.has(c.id));
+    if (targets.length === 0) return;
+
+    const controller = new AbortController();
+    batchAbortRef.current = controller;
+    setBatchDownloading(true);
+    setDownloadError(null);
+    try {
+      for (const ch of targets) {
+        if (controller.signal.aborted) break;
+        await handleDownloadSingleChapter(ch, controller.signal);
+      }
+    } finally {
+      batchAbortRef.current = null;
+      setBatchDownloading(false);
     }
   }
 
@@ -151,10 +249,11 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
   const orderedChapters = useMemo(() => {
     const sorted = [...chapters].sort((a, b) => a.orderIndex - b.orderIndex);
     const list = sortDesc ? sorted : [...sorted].reverse();
-    if (!chapterQuery.trim()) return list;
+    const filteredUnread = onlyUnread ? list.filter((c) => !c.read) : list;
+    if (!chapterQuery.trim()) return filteredUnread;
     const q = chapterQuery.trim().toLowerCase();
-    return list.filter((c) => c.title.toLowerCase().includes(q));
-  }, [chapters, sortDesc, chapterQuery]);
+    return filteredUnread.filter((c) => c.title.toLowerCase().includes(q));
+  }, [chapters, sortDesc, onlyUnread, chapterQuery]);
 
   const resumeChapter = useMemo(() => {
     if (chapters.length === 0) return undefined;
@@ -357,13 +456,14 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
         <CloudflareBanner
           sourceName={activeSource.name}
           url={syncError.url}
+          probeUrl={syncError.probeUrl}
           onRetry={() => void refreshFromActiveSource()}
         />
       )}
 
-      {syncError?.kind === 'error' && (
+      {(syncError?.kind === 'error' || downloadError) && (
         <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
-          {syncError.message}
+          {downloadError ?? (syncError?.kind === 'error' ? syncError.message : '')}
         </div>
       )}
 
@@ -375,6 +475,12 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
             <h2 className="text-base font-semibold text-white">
               Chapitres ({chapters.length})
             </h2>
+            {offlineEntries.length > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+                <HardDrive className="h-3 w-3" />
+                {offlineEntries.length} hors-ligne
+              </span>
+            )}
             {syncing && <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />}
           </div>
 
@@ -388,12 +494,48 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
             />
             <button
               type="button"
+              onClick={() => setOnlyUnread((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
+                onlyUnread
+                  ? 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                  : 'border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              Non lus uniquement
+            </button>
+            <button
+              type="button"
               onClick={() => setSortDesc((v) => !v)}
               className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
             >
               <ArrowUpDown className="h-3.5 w-3.5" />
               {sortDesc ? 'Plus récents' : 'Plus anciens'}
             </button>
+            {activeSource && chapters.some((c) => !c.read && !offlineByChapterId.has(c.id)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (batchDownloading) {
+                    batchAbortRef.current?.abort();
+                  } else {
+                    void handleDownloadUnreadChapters();
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+              >
+                {batchDownloading ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-rose-400" />
+                    Annuler téléchargement
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3.5 w-3.5 text-rose-400" />
+                    Télécharger non lus
+                  </>
+                )}
+              </button>
+            )}
             {chapters.length > 0 && activeSource && (
               <button
                 type="button"
@@ -464,6 +606,45 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 <div className="flex shrink-0 items-center gap-1.5">
                   {activeSource && (
                     <>
+                      {(() => {
+                        const dl = downloadingProgress[chapter.id];
+                        const offline = offlineByChapterId.get(chapter.id);
+                        if (dl) {
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-lg bg-zinc-900 px-2 py-1 text-[11px] font-mono text-rose-300"
+                              title="Téléchargement hors-ligne en cours"
+                            >
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              {dl.total > 0 ? `${dl.done}/${dl.total}` : '...'}
+                            </span>
+                          );
+                        }
+                        if (offline) {
+                          return (
+                            <button
+                              type="button"
+                              title={`Supprimer du cache hors-ligne (${formatBytes(offline.totalBytes)})`}
+                              onClick={() => void removeOfflineChapter(chapter.id)}
+                              className="group inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 px-2 py-1 text-[11px] font-medium text-emerald-300 hover:bg-rose-500/15 hover:text-rose-300"
+                            >
+                              <HardDrive className="h-3.5 w-3.5 group-hover:hidden" />
+                              <Trash2 className="hidden h-3.5 w-3.5 group-hover:block" />
+                              <span className="hidden sm:inline">{formatBytes(offline.totalBytes)}</span>
+                            </button>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            title="Télécharger pour lecture hors-ligne"
+                            onClick={() => void handleDownloadSingleChapter(chapter)}
+                            className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                          >
+                            <Download className="h-4 w-4" />
+                          </button>
+                        );
+                      })()}
                       <button
                         type="button"
                         title="Marquer jusqu'ici comme lu"

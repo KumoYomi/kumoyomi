@@ -6,6 +6,8 @@ interface AntiHotlinkImageProps {
   src?: string;
   referer?: string;
   scopeId?: string;
+  offlineChapterId?: string;
+  pageIndex?: number;
   alt: string;
   className?: string;
   placeholderClassName?: string;
@@ -19,6 +21,8 @@ export function AntiHotlinkImage({
   src,
   referer,
   scopeId = 'covers',
+  offlineChapterId,
+  pageIndex,
   alt,
   className = '',
   placeholderClassName,
@@ -50,7 +54,7 @@ export function AntiHotlinkImage({
     setError(false);
     setErrorMessage(null);
 
-    fetchImageAsBlobUrl(src, referer, scopeId, { priority })
+    fetchImageAsBlobUrl(src, referer, scopeId, { priority, offlineChapterId, pageIndex })
       .then((objectUrl) => {
         if (!active) return;
         setBlobSrc(objectUrl);
@@ -68,7 +72,7 @@ export function AntiHotlinkImage({
     return () => {
       active = false;
     };
-  }, [src, referer, scopeId, priority, attempt]);
+  }, [src, referer, scopeId, priority, offlineChapterId, pageIndex, attempt]);
 
   const boxClass = placeholderClassName ?? className;
 

@@ -14,7 +14,7 @@ const CHALLENGE_TITLE_MARKERS = [
   'ddos-guard',
 ];
 
-function looksLikeChallengeTitle(title?: string): boolean {
+export function looksLikeChallengeTitle(title?: string): boolean {
   if (!title) return false;
   const lower = title.toLowerCase();
   return CHALLENGE_TITLE_MARKERS.some((m) => lower.includes(m));

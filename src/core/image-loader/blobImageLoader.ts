@@ -232,11 +232,54 @@ async function trimCoverCacheIfNeeded(): Promise<void> {
   }
 }
 
+export async function fetchImageBlob(
+  imageUrl: string,
+  refererUrl?: string,
+  priority: ImageFetchPriority = 'high',
+): Promise<Blob> {
+  const trimmed = imageUrl.trim();
+  if (!trimmed) {
+    throw new Error("URL d'image vide.");
+  }
+
+  await ensureReferer(trimmed, refererUrl);
+
+  const blob = await withImageConcurrency(priority, async () => {
+    const backoffs = [0, 500, 1200];
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
+      const wait = backoffs[attempt] ?? 0;
+      if (wait > 0) await delayMs(wait);
+      try {
+        return await downloadImageBlobOnce(trimmed, refererUrl);
+      } catch (err) {
+        lastErr = err;
+        const retryable = Boolean(
+          err && typeof err === 'object' && 'retryable' in err && (err as { retryable?: boolean }).retryable,
+        );
+        if (!retryable || attempt === backoffs.length - 1) {
+          throw err;
+        }
+      }
+    }
+    throw lastErr;
+  });
+
+  if (!blob || blob.size === 0) {
+    throw new Error('Image vide reçue');
+  }
+  return blob;
+}
+
 export async function fetchImageAsBlobUrl(
   imageUrl: string,
   refererUrl?: string,
   scopeId = 'covers',
-  options?: { priority?: ImageFetchPriority },
+  options?: {
+    priority?: ImageFetchPriority;
+    offlineChapterId?: string;
+    pageIndex?: number;
+  },
 ): Promise<string> {
   const trimmed = imageUrl.trim();
   if (!trimmed) {
@@ -260,6 +303,17 @@ export async function fetchImageAsBlobUrl(
   const priority = options?.priority ?? 'high';
   const task = (async () => {
     try {
+      if (options?.offlineChapterId && options.pageIndex !== undefined) {
+        const offlinePage = await db.chapterPageBlobs.get(
+          `${options.offlineChapterId}:${options.pageIndex}`,
+        );
+        if (offlinePage?.blob) {
+          const objectUrl = URL.createObjectURL(offlinePage.blob);
+          trackScopeUrl(scopeId, trimmed, objectUrl);
+          return objectUrl;
+        }
+      }
+
       if (scopeId === 'covers') {
         const cached = await db.coverBlobs.get(trimmed);
         if (cached?.blob) {
@@ -269,32 +323,7 @@ export async function fetchImageAsBlobUrl(
         }
       }
 
-      await ensureReferer(trimmed, refererUrl);
-
-      const blob = await withImageConcurrency(priority, async () => {
-        const backoffs = [0, 500, 1200];
-        let lastErr: unknown;
-        for (let attempt = 0; attempt < backoffs.length; attempt += 1) {
-          const wait = backoffs[attempt] ?? 0;
-          if (wait > 0) await delayMs(wait);
-          try {
-            return await downloadImageBlobOnce(trimmed, refererUrl);
-          } catch (err) {
-            lastErr = err;
-            const retryable = Boolean(
-              err && typeof err === 'object' && 'retryable' in err && (err as { retryable?: boolean }).retryable,
-            );
-            if (!retryable || attempt === backoffs.length - 1) {
-              throw err;
-            }
-          }
-        }
-        throw lastErr;
-      });
-
-      if (!blob || blob.size === 0) {
-        throw new Error('Image vide reçue');
-      }
+      const blob = await fetchImageBlob(trimmed, refererUrl, priority);
 
       if (scopeId === 'covers' && blob.size < 2_500_000) {
         try {

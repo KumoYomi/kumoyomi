@@ -6,11 +6,15 @@ import {
   Columns2,
   Eye,
   FileImage,
+  HardDrive,
   Loader2,
   Maximize2,
   Minimize2,
+  RotateCcw,
   Rows3,
   SlidersHorizontal,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { navigate } from '@/src/app/router';
@@ -18,13 +22,15 @@ import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { DEFAULT_APP_SETTINGS, db, getOrCreateSettings } from '@/src/core/db/db';
 import { recordChapterProgress } from '@/src/core/db/mangaRepository';
+import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
 import {
   fetchImageAsBlobUrl,
   revokeScopeBlobUrls,
 } from '@/src/core/image-loader/blobImageLoader';
+import { getOfflineChapterPages } from '@/src/core/offline/offlineCache';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
-import type { ReaderMode, ReadingDirection } from '@/src/core/types/manga';
+import type { PageFitMode, ReaderMode, ReadingDirection } from '@/src/core/types/manga';
 import type { ParsedPageItem } from '@/src/core/types/source';
 
 interface ReaderPageProps {
@@ -37,6 +43,7 @@ interface LazyWebtoonPageProps {
   index: number;
   referer?: string;
   scopeId: string;
+  offlineChapterId?: string;
   registerRef: (el: HTMLDivElement | null) => void;
 }
 
@@ -45,6 +52,7 @@ function LazyWebtoonPage({
   index,
   referer,
   scopeId,
+  offlineChapterId,
   registerRef,
 }: LazyWebtoonPageProps) {
   const [shouldLoad, setShouldLoad] = useState(index <= 2);
@@ -82,6 +90,8 @@ function LazyWebtoonPage({
           src={page.imageUrl}
           referer={referer}
           scopeId={scopeId}
+          offlineChapterId={offlineChapterId}
+          pageIndex={page.index}
           alt={`Planche ${index + 1}`}
           loadingLabel={`Chargement de la page ${index + 1}...`}
           priority="high"
@@ -122,15 +132,21 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
 
   const [readerMode, setReaderMode] = useState<ReaderMode>('webtoon');
   const [direction, setDirection] = useState<ReadingDirection>('ltr');
+  const [pageFitMode, setPageFitMode] = useState<PageFitMode>('contain');
+  const [zoomPercent, setZoomPercent] = useState<number>(100);
   const [webtoonWidth, setWebtoonWidth] = useState<number>(820);
+  const [webtoonGap, setWebtoonGap] = useState<number>(0);
   const [doubleOffset, setDoubleOffset] = useState<boolean>(true);
   const [preloadCount, setPreloadCount] = useState<number>(DEFAULT_APP_SETTINGS.preloadPagesCount);
   const settingsInitializedRef = useRef(false);
 
   const [pages, setPages] = useState<ParsedPageItem[]>([]);
+  const [isOfflineCached, setIsOfflineCached] = useState<boolean>(false);
   const [loadingPages, setLoadingPages] = useState<boolean>(true);
   const [pageError, setPageError] = useState<
-    { kind: 'cloudflare'; url: string } | { kind: 'error'; message: string } | null
+    | { kind: 'cloudflare'; url: string; probeUrl?: string }
+    | { kind: 'error'; message: string }
+    | null
   >(null);
 
   const [currentPage, setCurrentPage] = useState<number>(0);
@@ -155,6 +171,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
 
   useEffect(() => {
     setPages([]);
+    setIsOfflineCached(false);
     setPageError(null);
     setLoadingPages(true);
     setCurrentPage(0);
@@ -167,7 +184,9 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     settingsInitializedRef.current = true;
     setReaderMode(savedSettings.readerMode);
     setDirection(savedSettings.readingDirection);
+    setPageFitMode(savedSettings.pageFitMode ?? 'contain');
     setWebtoonWidth(savedSettings.webtoonWidth);
+    setWebtoonGap(savedSettings.webtoonGap ?? 0);
     setDoubleOffset(savedSettings.doublePageOffset);
     setPreloadCount(savedSettings.preloadPagesCount ?? DEFAULT_APP_SETTINGS.preloadPagesCount);
   }, [savedSettings]);
@@ -204,13 +223,21 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     setLoadingPages(true);
     setPageError(null);
     setPages([]);
+    setIsOfflineCached(false);
 
     void (async () => {
       try {
-        const result = await parserEngine.getChapterPages(
-          activeSource.resolvedConfig,
-          sourceChapterUrl,
-        );
+        const offlinePages = await getOfflineChapterPages(chapterId);
+        if (cancelled) return;
+        let result: ParsedPageItem[];
+        if (offlinePages && offlinePages.length > 0) {
+          setIsOfflineCached(true);
+          result = offlinePages;
+        } else {
+          result = await runWithAutoCloudflarePopup(() =>
+            parserEngine.getChapterPages(activeSource.resolvedConfig, sourceChapterUrl),
+          );
+        }
         if (cancelled) return;
         if (result.length === 0) {
           setPageError({
@@ -235,7 +262,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
         if (cancelled) return;
         loadedKeyRef.current = '';
         if (err instanceof CloudflareChallengeError) {
-          setPageError({ kind: 'cloudflare', url: err.url });
+          setPageError({ kind: 'cloudflare', url: err.url, probeUrl: err.requestUrl });
         } else {
           setPageError({
             kind: 'error',
@@ -279,7 +306,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
   // Préchargement ordonné et configurable des N prochaines planches (sans bloquer la page visible)
   useEffect(() => {
     const baseUrl = sourceRef.current?.baseUrl;
-    if (!baseUrl || pages.length === 0 || preloadCount <= 0) return;
+    if (!baseUrl || pages.length === 0 || preloadCount <= 0 || isOfflineCached) return;
 
     const currentLastIndex =
       readerMode === 'double'
@@ -301,7 +328,17 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     return () => {
       cancelled = true;
     };
-  }, [currentPage, currentSpreadIndex, spreads, pages, sourceId, scopeId, readerMode, preloadCount]);
+  }, [
+    currentPage,
+    currentSpreadIndex,
+    spreads,
+    pages,
+    sourceId,
+    scopeId,
+    readerMode,
+    preloadCount,
+    isOfflineCached,
+  ]);
 
   // Enregistrement automatique de la progression sans re-déclencher loadPages
   useEffect(() => {
@@ -493,11 +530,29 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     switchReaderMode,
   ]);
 
+  useEffect(() => {
+    if (readerMode !== 'webtoon' || showOptions || loadingPages || pageError) return;
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y > 140 && y - lastY > 18) {
+        setShowHud(false);
+      } else if (lastY - y > 24 || y <= 40) {
+        setShowHud(true);
+      }
+      lastY = y;
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [readerMode, showOptions, loadingPages, pageError]);
+
   async function persistReaderPref(
     patch: Partial<{
       readerMode: ReaderMode;
       readingDirection: ReadingDirection;
+      pageFitMode: PageFitMode;
       webtoonWidth: number;
+      webtoonGap: number;
       doublePageOffset: boolean;
       preloadPagesCount: number;
     }>,
@@ -525,9 +580,17 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               Fiche
             </button>
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">
-                {manga?.title ?? 'Chargement...'}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="truncate text-sm font-semibold text-white">
+                  {manga?.title ?? 'Chargement...'}
+                </p>
+                {isOfflineCached && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">
+                    <HardDrive className="h-3 w-3" />
+                    Hors-ligne
+                  </span>
+                )}
+              </div>
               <p className="truncate text-xs text-zinc-400">{chapter?.title ?? ''}</p>
             </div>
           </div>
@@ -652,22 +715,106 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               </div>
 
               {readerMode === 'webtoon' && (
-                <label className="flex items-center gap-3 text-zinc-400">
-                  Largeur ({webtoonWidth} px)
-                  <input
-                    type="range"
-                    min={560}
-                    max={1200}
-                    step={20}
-                    value={webtoonWidth}
-                    onChange={(e) => {
-                      const w = Number.parseInt(e.target.value, 10);
-                      setWebtoonWidth(w);
-                      void persistReaderPref({ webtoonWidth: w });
-                    }}
-                    className="accent-rose-500"
-                  />
-                </label>
+                <>
+                  <label className="flex items-center gap-3 text-zinc-400">
+                    Largeur ({webtoonWidth} px)
+                    <input
+                      type="range"
+                      min={560}
+                      max={1200}
+                      step={20}
+                      value={webtoonWidth}
+                      onChange={(e) => {
+                        const w = Number.parseInt(e.target.value, 10);
+                        setWebtoonWidth(w);
+                        void persistReaderPref({ webtoonWidth: w });
+                      }}
+                      className="accent-rose-500"
+                    />
+                  </label>
+                  <label className="flex items-center gap-3 text-zinc-400">
+                    Espacement ({webtoonGap} px)
+                    <input
+                      type="range"
+                      min={0}
+                      max={32}
+                      step={4}
+                      value={webtoonGap}
+                      onChange={(e) => {
+                        const g = Number.parseInt(e.target.value, 10);
+                        setWebtoonGap(g);
+                        void persistReaderPref({ webtoonGap: g });
+                      }}
+                      className="accent-rose-500"
+                    />
+                  </label>
+                </>
+              )}
+
+              {readerMode !== 'webtoon' && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-400">Ajustement :</span>
+                    <div className="flex items-center rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+                      {(
+                        [
+                          { id: 'contain', label: 'Écran' },
+                          { id: 'width', label: 'Largeur' },
+                          { id: 'original', label: 'Original' },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            setPageFitMode(opt.id);
+                            void persistReaderPref({ pageFitMode: opt.id });
+                          }}
+                          className={`rounded px-2 py-0.5 text-[11px] font-medium ${
+                            pageFitMode === opt.id
+                              ? 'bg-rose-600 text-white'
+                              : 'text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <span className="text-zinc-400 mr-1">Zoom :</span>
+                    <button
+                      type="button"
+                      onClick={() => setZoomPercent((z) => Math.max(60, z - 15))}
+                      className="rounded-lg border border-zinc-700 bg-zinc-900 p-1 text-zinc-200 hover:bg-zinc-800"
+                      title="Dézoomer"
+                    >
+                      <ZoomOut className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="min-w-[3rem] text-center font-mono text-zinc-200">
+                      {zoomPercent}%
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setZoomPercent((z) => Math.min(200, z + 15))}
+                      className="rounded-lg border border-zinc-700 bg-zinc-900 p-1 text-zinc-200 hover:bg-zinc-800"
+                      title="Zoomer"
+                    >
+                      <ZoomIn className="h-3.5 w-3.5" />
+                    </button>
+                    {zoomPercent !== 100 && (
+                      <button
+                        type="button"
+                        onClick={() => setZoomPercent(100)}
+                        className="rounded-lg border border-zinc-700 bg-zinc-900 p-1 text-zinc-300 hover:bg-zinc-800"
+                        title="Réinitialiser à 100%"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
 
               {readerMode === 'double' && (
@@ -736,6 +883,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             <CloudflareBanner
               sourceName={source.name}
               url={pageError.url}
+              probeUrl={pageError.probeUrl}
               onRetry={() => setReloadNonce((n) => n + 1)}
             />
           </div>
@@ -756,7 +904,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               setShowHud((v) => !v);
             }}
             className="mx-auto flex flex-col items-center px-2"
-            style={{ maxWidth: `${webtoonWidth}px` }}
+            style={{ maxWidth: `${webtoonWidth}px`, gap: `${webtoonGap}px` }}
           >
             {pages.map((p, idx) => (
               <LazyWebtoonPage
@@ -765,6 +913,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 index={idx}
                 referer={source?.baseUrl}
                 scopeId={scopeId}
+                offlineChapterId={isOfflineCached ? chapterId : undefined}
                 registerRef={(el) => {
                   webtoonRefs.current[idx] = el;
                 }}
@@ -801,22 +950,33 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             </button>
 
             {readerMode === 'single' && (
-              <AntiHotlinkImage
-                key={pages[currentPage]?.imageUrl}
-                src={pages[currentPage]?.imageUrl}
-                referer={source?.baseUrl}
-                scopeId={scopeId}
-                alt={`Planche ${currentPage + 1}`}
-                loadingLabel={`Chargement de la page ${currentPage + 1}...`}
-                priority="high"
-                showRetry
-                placeholderClassName="h-[68vh] w-[min(85vw,680px)] rounded-xl"
-                className="max-h-[calc(100vh-9.5rem)] max-w-full rounded object-contain shadow-2xl"
-              />
+              <div style={zoomPercent !== 100 ? { zoom: zoomPercent / 100 } : undefined}>
+                <AntiHotlinkImage
+                  key={pages[currentPage]?.imageUrl}
+                  src={pages[currentPage]?.imageUrl}
+                  referer={source?.baseUrl}
+                  scopeId={scopeId}
+                  offlineChapterId={isOfflineCached ? chapterId : undefined}
+                  pageIndex={pages[currentPage]?.index}
+                  alt={`Planche ${currentPage + 1}`}
+                  loadingLabel={`Chargement de la page ${currentPage + 1}...`}
+                  priority="high"
+                  showRetry
+                  placeholderClassName="h-[68vh] w-[min(85vw,680px)] rounded-xl"
+                  className={
+                    pageFitMode === 'width'
+                      ? 'w-[min(92vw,1100px)] max-w-none rounded object-contain shadow-2xl'
+                      : pageFitMode === 'original'
+                        ? 'max-w-none rounded object-contain shadow-2xl'
+                        : 'max-h-[calc(100vh-9.5rem)] max-w-full rounded object-contain shadow-2xl'
+                  }
+                />
+              </div>
             )}
 
             {readerMode === 'double' && (
               <div
+                style={zoomPercent !== 100 ? { zoom: zoomPercent / 100 } : undefined}
                 className={`flex max-w-full flex-nowrap items-center justify-center gap-2 ${
                   direction === 'rtl' ? 'flex-row-reverse' : 'flex-row'
                 }`}
@@ -827,12 +987,20 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                     src={p.imageUrl}
                     referer={source?.baseUrl}
                     scopeId={scopeId}
+                    offlineChapterId={isOfflineCached ? chapterId : undefined}
+                    pageIndex={p.index}
                     alt={`Planche ${p.index + 1}`}
                     loadingLabel={`Chargement de la page ${p.index + 1}...`}
                     priority="high"
                     showRetry
                     placeholderClassName="h-[68vh] w-[42vw] max-w-[540px] rounded-xl"
-                    className="max-h-[calc(100vh-9.5rem)] max-w-[45vw] w-auto rounded object-contain shadow-2xl"
+                    className={
+                      pageFitMode === 'width'
+                        ? 'max-w-[46vw] w-auto rounded object-contain shadow-2xl'
+                        : pageFitMode === 'original'
+                          ? 'max-w-none w-auto rounded object-contain shadow-2xl'
+                          : 'max-h-[calc(100vh-9.5rem)] max-w-[45vw] w-auto rounded object-contain shadow-2xl'
+                    }
                   />
                 ))}
               </div>

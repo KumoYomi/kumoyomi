@@ -11,6 +11,7 @@ export class CloudflareChallengeError extends Error {
   readonly sourceId: string;
   readonly sourceName: string;
   readonly url: string;
+  readonly requestUrl?: string;
   readonly status: number;
   readonly reason?: 'no_tab' | 'tab_blocked';
 
@@ -18,6 +19,7 @@ export class CloudflareChallengeError extends Error {
     sourceId: string;
     sourceName: string;
     url: string;
+    requestUrl?: string;
     status: number;
     reason?: 'no_tab' | 'tab_blocked';
   }) {
@@ -34,6 +36,7 @@ export class CloudflareChallengeError extends Error {
     this.sourceId = params.sourceId;
     this.sourceName = params.sourceName;
     this.url = params.url;
+    this.requestUrl = params.requestUrl;
     this.status = params.status;
     this.reason = params.reason;
   }
@@ -241,11 +244,13 @@ function throwCloudflareError(
   source: SourceConfig,
   status: number,
   reason?: 'no_tab' | 'tab_blocked',
+  requestUrl?: string,
 ): never {
   throw new CloudflareChallengeError({
     sourceId: source.id,
     sourceName: source.name,
     url: source.baseUrl,
+    requestUrl,
     status,
     reason,
   });
@@ -276,7 +281,7 @@ async function executeTimedFetch(
     const proxied = await fetchViaOpenTabWithRetry(url, init, source, timeoutMs);
     if (proxied) {
       if (isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
-        throwCloudflareError(source, proxied.response.status, 'tab_blocked');
+        throwCloudflareError(source, proxied.response.status, 'tab_blocked', url);
       }
       markSiteTabProxied(url);
       return proxied;
@@ -327,6 +332,7 @@ async function executeTimedFetch(
       source,
       proxied?.response.status ?? response.status,
       proxied ? 'tab_blocked' : 'no_tab',
+      url,
     );
   }
 

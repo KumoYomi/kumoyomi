@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { normalizeMangaKey } from '@/src/core/db/db';
+import { db, normalizeMangaKey } from '@/src/core/db/db';
+import { formatBytes } from '@/src/core/offline/offlineCache';
 import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
 import { UniversalParserEngine } from '@/src/core/parser/engine';
@@ -793,5 +794,43 @@ describe('KumoYomi Universal Parser & Templates', () => {
 
     clearTabProxyCache();
     expect(sessionStorage.getItem('kumoyomi:tab_proxied_domains')).toBeNull();
+  });
+
+  it('lit une planche hors-ligne depuis IndexedDB sans requête réseau et formate les tailles', async () => {
+    expect(formatBytes(512)).toBe('512 o');
+    expect(formatBytes(2048)).toBe('2 Ko');
+    expect(formatBytes(3 * 1024 * 1024)).toBe('3.0 Mo');
+
+    const createObjectUrlSpy = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:offline-cached-page');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const blob = new Blob(['cached-bytes'], { type: 'image/webp' });
+    const getSpy = vi.spyOn(db.chapterPageBlobs, 'get').mockResolvedValue({
+      id: 'ch-offline:2',
+      chapterId: 'ch-offline',
+      pageIndex: 2,
+      imageUrl: 'https://cdn.example.invalid/ch/03.webp',
+      mimeType: 'image/webp',
+      blob,
+    });
+
+    const url = await fetchImageAsBlobUrl(
+      'https://cdn.example.invalid/ch/03.webp',
+      'https://example.invalid',
+      'reader-offline-test',
+      { offlineChapterId: 'ch-offline', pageIndex: 2 },
+    );
+
+    expect(url).toBe('blob:offline-cached-page');
+    expect(getSpy).toHaveBeenCalledWith('ch-offline:2');
+    expect(createObjectUrlSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    revokeScopeBlobUrls('reader-offline-test');
   });
 });

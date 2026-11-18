@@ -1,10 +1,14 @@
-import { ExternalLink, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { ExternalLink, Loader2, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { openExternalTab } from '@/src/core/extension/browserBridge';
+import {
+  openExternalTab,
+  requestCloudflareVerificationPopup,
+} from '@/src/core/extension/browserBridge';
 
 interface CloudflareBannerProps {
   sourceName: string;
   url: string;
+  probeUrl?: string;
   onRetry?: () => void;
   onDismiss?: () => void;
   compact?: boolean;
@@ -13,11 +17,13 @@ interface CloudflareBannerProps {
 export function CloudflareBanner({
   sourceName,
   url,
+  probeUrl,
   onRetry,
   onDismiss,
   compact = false,
 }: CloudflareBannerProps) {
   const [waitingUnlock, setWaitingUnlock] = useState(false);
+  const [verifyingPopup, setVerifyingPopup] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const onRetryRef = useRef(onRetry);
   onRetryRef.current = onRetry;
@@ -25,6 +31,7 @@ export function CloudflareBanner({
   useEffect(() => {
     setDismissed(false);
     setWaitingUnlock(false);
+    setVerifyingPopup(false);
   }, [url, sourceName]);
 
   useEffect(() => {
@@ -53,6 +60,19 @@ export function CloudflareBanner({
     };
   }, [waitingUnlock]);
 
+  async function handleOpenPopup() {
+    setVerifyingPopup(true);
+    setWaitingUnlock(false);
+    try {
+      const res = await requestCloudflareVerificationPopup(url, { probeUrl: probeUrl ?? url });
+      if (res.unlocked) {
+        onRetryRef.current?.();
+      }
+    } finally {
+      setVerifyingPopup(false);
+    }
+  }
+
   if (dismissed) return null;
 
   return (
@@ -68,27 +88,43 @@ export function CloudflareBanner({
           </div>
           <div className="space-y-1">
             <p className="text-sm font-semibold text-amber-200">
-              Vérification Cloudflare requise sur {sourceName}
+              Vérification Cloudflare / Captcha requise sur {sourceName}
             </p>
             <p className="text-xs leading-relaxed text-amber-200/80">
-              {waitingUnlock
-                ? 'Onglet ouvert : validez/chargez la page dans cet onglet, gardez-le ouvert, puis revenez ici — KumoYomi relancera automatiquement.'
-                : 'Ouvrez ou rechargez le site (F5) dans un onglet pour valider la session Cloudflare et gardez cet onglet ouvert.'}
+              {verifyingPopup
+                ? 'Validez la vérification dans la petite fenêtre — elle se refermera automatiquement dès que la session sera débloquée.'
+                : waitingUnlock
+                  ? 'Onglet ouvert : validez la page puis revenez ici — KumoYomi relancera automatiquement.'
+                  : 'Ouvrez la petite fenêtre de vérification pour cocher Cloudflare/Captcha ; elle se refermera toute seule dès que le site répond.'}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={verifyingPopup}
+            onClick={() => void handleOpenPopup()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 transition hover:bg-amber-400 disabled:opacity-60"
+          >
+            {verifyingPopup ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ShieldAlert className="h-3.5 w-3.5" />
+            )}
+            {verifyingPopup ? 'Vérification en cours...' : 'Vérifier (petite fenêtre)'}
+          </button>
           <button
             type="button"
             onClick={() => {
               if (onRetry) setWaitingUnlock(true);
               void openExternalTab(url);
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 transition hover:bg-amber-400"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-500/10 px-2.5 py-1.5 text-xs font-medium text-amber-100 transition hover:bg-amber-500/20"
+            title="Ouvrir dans un onglet classique"
           >
             <ExternalLink className="h-3.5 w-3.5" />
-            Ouvrir le site dans un onglet
+            Onglet
           </button>
           {onRetry && (
             <button

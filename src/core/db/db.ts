@@ -5,6 +5,8 @@ import type {
   InstalledSourceRecord,
   MangaEntity,
   MangaSourceLink,
+  OfflineChapterMeta,
+  OfflinePageBlob,
   ReadingHistoryEntry,
   RepositoryRecord,
   TemplateRecord,
@@ -22,10 +24,13 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   id: 'default',
   readerMode: 'webtoon',
   readingDirection: 'ltr',
+  pageFitMode: 'contain',
   webtoonWidth: 820,
+  webtoonGap: 0,
   doublePageOffset: true,
   preloadPagesCount: 4,
   updateIntervalMinutes: 120,
+  autoOpenCloudflarePopup: true,
 };
 
 export function normalizeMangaKey(title: string): string {
@@ -59,6 +64,8 @@ export class KumoYomiDB extends Dexie {
   chapters!: EntityTable<ChapterEntity, 'id'>;
   history!: EntityTable<ReadingHistoryEntry, 'id'>;
   coverBlobs!: EntityTable<CoverBlobCacheEntry, 'url'>;
+  offlineChapters!: EntityTable<OfflineChapterMeta, 'chapterId'>;
+  chapterPageBlobs!: EntityTable<OfflinePageBlob, 'id'>;
   settings!: EntityTable<AppSettings, 'id'>;
 
   constructor() {
@@ -73,6 +80,20 @@ export class KumoYomiDB extends Dexie {
         'id, mangaId, sourceId, sourceChapterUrl, chapterNumber, read, isNew, [mangaId+sourceId], [sourceId+sourceChapterUrl]',
       history: 'id, mangaId, chapterId, readAt',
       coverBlobs: 'url, cachedAt',
+      settings: 'id',
+    });
+    this.version(2).stores({
+      repositories: 'id, url, lastFetchedAt',
+      templates: 'id, repoId',
+      sources: 'id, repoId, enabled, lang',
+      mangas: 'id, normalizedKey, favorite, libraryStatus, updatedAt, unreadCount',
+      mangaSources: 'id, mangaId, sourceId, sourceMangaUrl, [mangaId+sourceId], [sourceId+sourceMangaUrl]',
+      chapters:
+        'id, mangaId, sourceId, sourceChapterUrl, chapterNumber, read, isNew, [mangaId+sourceId], [sourceId+sourceChapterUrl]',
+      history: 'id, mangaId, chapterId, readAt',
+      coverBlobs: 'url, cachedAt',
+      offlineChapters: 'chapterId, mangaId, sourceId, cachedAt',
+      chapterPageBlobs: 'id, chapterId, pageIndex',
       settings: 'id',
     });
   }

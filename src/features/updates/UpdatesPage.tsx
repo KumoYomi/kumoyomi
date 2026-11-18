@@ -1,13 +1,36 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Bell, Clock, Play } from 'lucide-react';
-import { useMemo } from 'react';
+import { Bell, CheckCheck, Clock, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
+import { UpdateCheckStatusBanner } from '@/src/components/UpdateCheckStatusBanner';
 import { db } from '@/src/core/db/db';
+import {
+  sendBackgroundMessage,
+  type UpdateCheckSummary,
+} from '@/src/core/extension/browserBridge';
+import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
 
 export function UpdatesPage() {
+  const [showAllHistory, setShowAllHistory] = useState(false);
+  const [showAllNew, setShowAllNew] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [checkProgress, setCheckProgress] = useState<{
+    current: number;
+    total: number;
+    title: string;
+  } | null>(null);
+  const [updateSummary, setUpdateSummary] = useState<UpdateCheckSummary | null>(null);
+
+  const historyLimit = showAllHistory ? 100 : 12;
+  const newLimit = showAllNew ? 250 : 60;
+
   const historyEntries =
-    useLiveQuery(() => db.history.orderBy('readAt').reverse().limit(12).toArray(), [], []) ?? [];
+    useLiveQuery(
+      () => db.history.orderBy('readAt').reverse().limit(historyLimit).toArray(),
+      [historyLimit],
+      [],
+    ) ?? [];
 
   const newChapters =
     useLiveQuery(
@@ -15,8 +38,8 @@ export function UpdatesPage() {
         db.chapters
           .filter((c) => c.isNew && !c.read)
           .toArray()
-          .then((list) => list.sort((a, b) => b.fetchedAt - a.fetchedAt).slice(0, 60)),
-      [],
+          .then((list) => list.sort((a, b) => b.fetchedAt - a.fetchedAt).slice(0, newLimit)),
+      [newLimit],
       [],
     ) ?? [];
 
@@ -26,20 +49,86 @@ export function UpdatesPage() {
   const mangaMap = useMemo(() => new Map(mangas.map((m) => [m.id, m])), [mangas]);
   const sourceMap = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
 
+  async function handleCheckUpdates() {
+    setCheckingUpdates(true);
+    setUpdateSummary(null);
+    setCheckProgress(null);
+    try {
+      const summary = await checkLibraryUpdates((current, total, title) => {
+        setCheckProgress({ current, total, title });
+      });
+      setUpdateSummary(summary);
+    } finally {
+      setCheckingUpdates(false);
+      setCheckProgress(null);
+    }
+  }
+
+  async function handleDismissNewFlags() {
+    await db.chapters.filter((c) => c.isNew).modify({ isNew: false });
+    await sendBackgroundMessage({ type: 'SET_BADGE_COUNT', count: 0 });
+  }
+
   return (
     <div className="space-y-9">
-      <header>
-        <h1 className="text-2xl font-bold tracking-tight text-white">Nouveautés & Historique</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Reprenez instantanément votre lecture et suivez les derniers chapitres détectés.
-        </p>
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Nouveautés & Historique</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            Reprenez instantanément votre lecture et suivez les derniers chapitres détectés.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={checkingUpdates}
+          onClick={() => void handleCheckUpdates()}
+          className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-500 disabled:opacity-50"
+        >
+          {checkingUpdates ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="h-4 w-4" />
+          )}
+          Vérifier les sorties
+        </button>
       </header>
+
+      <UpdateCheckStatusBanner
+        progress={checkProgress}
+        summary={updateSummary}
+        sourceById={sourceMap}
+        onRetry={() => void handleCheckUpdates()}
+      />
 
       {/* Historique de lecture */}
       <section className="space-y-4">
-        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          <Clock className="h-4 w-4 text-rose-400" />
-          Reprendre la lecture
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
+            <Clock className="h-4 w-4 text-rose-400" />
+            Reprendre la lecture
+          </div>
+          {historyEntries.length > 0 && (
+            <div className="flex items-center gap-2">
+              {historyEntries.length >= 12 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllHistory((v) => !v)}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                >
+                  {showAllHistory ? 'Réduire' : 'Tout afficher'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void db.history.clear()}
+                className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:border-rose-500/40 hover:text-rose-300"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Effacer l&apos;historique
+              </button>
+            </div>
+          )}
         </div>
 
         {historyEntries.length === 0 ? (
@@ -110,9 +199,32 @@ export function UpdatesPage() {
 
       {/* Nouveaux chapitres détectés */}
       <section className="space-y-4">
-        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          <Bell className="h-4 w-4 text-rose-400" />
-          Nouveaux chapitres ({newChapters.length})
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
+            <Bell className="h-4 w-4 text-rose-400" />
+            Nouveaux chapitres ({newChapters.length})
+          </div>
+          {newChapters.length > 0 && (
+            <div className="flex items-center gap-2">
+              {newChapters.length >= 60 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllNew((v) => !v)}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                >
+                  {showAllNew ? 'Réduire' : 'Tout afficher'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleDismissNewFlags()}
+                className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+              >
+                <CheckCheck className="h-3.5 w-3.5 text-rose-400" />
+                Tout marquer comme vu
+              </button>
+            </div>
+          )}
         </div>
 
         {newChapters.length === 0 ? (

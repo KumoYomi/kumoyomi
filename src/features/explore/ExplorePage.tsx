@@ -15,6 +15,7 @@ import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { db, normalizeMangaKey } from '@/src/core/db/db';
 import { upsertMangaFromCatalogueItem } from '@/src/core/db/mangaRepository';
+import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import type { InstalledSourceRecord } from '@/src/core/types/manga';
@@ -31,6 +32,7 @@ interface SourceSearchState {
   items: ParsedCatalogueItem[];
   errorMessage?: string;
   cloudflareUrl?: string;
+  cloudflareProbeUrl?: string;
 }
 
 interface GroupedSearchResult {
@@ -60,7 +62,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
   const [browseHasNext, setBrowseHasNext] = useState(false);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseError, setBrowseError] = useState<
-    { kind: 'cloudflare'; url: string } | { kind: 'error'; message: string } | null
+    { kind: 'cloudflare'; url: string; probeUrl?: string } | { kind: 'error'; message: string } | null
   >(null);
 
   const searchRunId = useRef(0);
@@ -115,6 +117,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 status: 'cloudflare',
                 items: [],
                 cloudflareUrl: err.url,
+                cloudflareProbeUrl: err.requestUrl,
               },
             }));
           } else {
@@ -140,7 +143,9 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
       [src.id]: { source: src, status: 'loading', items: [] },
     }));
     try {
-      const res = await parserEngine.search(src.resolvedConfig, activeQuery, 1);
+      const res = await runWithAutoCloudflarePopup(() =>
+        parserEngine.search(src.resolvedConfig, activeQuery, 1),
+      );
       setSearchStates((prev) => ({
         ...prev,
         [src.id]: { source: src, status: 'done', items: res.items },
@@ -149,7 +154,13 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
       if (err instanceof CloudflareChallengeError) {
         setSearchStates((prev) => ({
           ...prev,
-          [src.id]: { source: src, status: 'cloudflare', items: [], cloudflareUrl: err.url },
+          [src.id]: {
+            source: src,
+            status: 'cloudflare',
+            items: [],
+            cloudflareUrl: err.url,
+            cloudflareProbeUrl: err.requestUrl,
+          },
         }));
       } else {
         setSearchStates((prev) => ({
@@ -174,16 +185,17 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
     setBrowseLoading(true);
     setBrowseError(null);
     try {
-      const pageRes =
+      const pageRes = await runWithAutoCloudflarePopup(() =>
         mode === 'popular'
-          ? await parserEngine.getPopular(src.resolvedConfig, pageNum)
-          : await parserEngine.getLatest(src.resolvedConfig, pageNum);
+          ? parserEngine.getPopular(src.resolvedConfig, pageNum)
+          : parserEngine.getLatest(src.resolvedConfig, pageNum),
+      );
       setBrowseItems((prev) => (append ? [...prev, ...pageRes.items] : pageRes.items));
       setBrowseHasNext(pageRes.hasNextPage);
       setBrowsePage(pageNum);
     } catch (err) {
       if (err instanceof CloudflareChallengeError) {
-        setBrowseError({ kind: 'cloudflare', url: err.url });
+        setBrowseError({ kind: 'cloudflare', url: err.url, probeUrl: err.requestUrl });
       } else {
         setBrowseError({
           kind: 'error',
@@ -364,6 +376,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                   key={st.source.id}
                   sourceName={st.source.name}
                   url={st.cloudflareUrl!}
+                  probeUrl={st.cloudflareProbeUrl}
                   compact
                   onRetry={() => void retrySingleSourceSearch(st.source)}
                 />
@@ -497,6 +510,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
             <CloudflareBanner
               sourceName={activeBrowseSource.name}
               url={browseError.url}
+              probeUrl={browseError.probeUrl}
               onRetry={() => void loadBrowseCatalogue(activeBrowseSource, browseMode, 1, false)}
             />
           )}

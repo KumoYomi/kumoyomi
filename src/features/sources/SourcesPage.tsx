@@ -8,17 +8,21 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
-import { type ChangeEvent, type FormEvent, useEffect, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { db } from '@/src/core/db/db';
 import {
   checkOriginPermission,
+  clearSiteTabProxied,
+  isSiteTabProxied,
   requestOriginPermission,
 } from '@/src/core/extension/browserBridge';
+import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import {
@@ -32,7 +36,7 @@ import type { InstalledSourceRecord } from '@/src/core/types/manga';
 type TestResult =
   | { status: 'loading' }
   | { status: 'ok'; count: number; sampleTitle?: string }
-  | { status: 'cloudflare'; url: string }
+  | { status: 'cloudflare'; url: string; probeUrl?: string }
   | { status: 'error'; message: string };
 
 export function SourcesPage() {
@@ -48,6 +52,26 @@ export function SourcesPage() {
   const [pastedJson, setPastedJson] = useState('');
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
   const [permissionsMap, setPermissionsMap] = useState<Record<string, boolean>>({});
+  const [sourceQuery, setSourceQuery] = useState('');
+  const [langFilter, setLangFilter] = useState<string>('all');
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const [sessionNonce, setSessionNonce] = useState(0);
+
+  const availableLangs = useMemo(
+    () => Array.from(new Set(sources.map((s) => s.lang.toLowerCase()))).sort(),
+    [sources],
+  );
+
+  const visibleSources = useMemo(() => {
+    const q = sourceQuery.trim().toLowerCase();
+    return sources.filter((s) => {
+      if (langFilter !== 'all' && s.lang.toLowerCase() !== langFilter) return false;
+      if (q && !s.name.toLowerCase().includes(q) && !s.baseUrl.toLowerCase().includes(q)) {
+        return false;
+      }
+      return true;
+    });
+  }, [sources, langFilter, sourceQuery]);
 
   useEffect(() => {
     let active = true;
@@ -160,6 +184,31 @@ export function SourcesPage() {
     }
   }
 
+  async function handleRefreshAllRepos() {
+    const remoteRepos = repositories.filter((r) => !r.url.startsWith('local://'));
+    if (remoteRepos.length === 0) return;
+    setRefreshingAll(true);
+    setFeedback(null);
+    let updatedSources = 0;
+    try {
+      for (const repo of remoteRepos) {
+        const res = await addOrRefreshRepositoryByUrl(repo.url);
+        updatedSources += res.sourcesCount;
+      }
+      setFeedback({
+        kind: 'ok',
+        text: `${remoteRepos.length} dépôt(s) actualisé(s) (${updatedSources} source(s) synchronisée(s)).`,
+      });
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        text: err instanceof Error ? err.message : 'Erreur lors de la synchronisation.',
+      });
+    } finally {
+      setRefreshingAll(false);
+    }
+  }
+
   async function handleTestSource(source: InstalledSourceRecord) {
     setTestResults((prev) => ({ ...prev, [source.id]: { status: 'loading' } }));
     try {
@@ -168,7 +217,10 @@ export function SourcesPage() {
         const granted = await requestOriginPermission(source.baseUrl);
         setPermissionsMap((prev) => ({ ...prev, [source.id]: granted }));
       }
-      const page = await parserEngine.getPopular(source.resolvedConfig, 1);
+      const page = await runWithAutoCloudflarePopup(() =>
+        parserEngine.getPopular(source.resolvedConfig, 1),
+      );
+      setSessionNonce((n) => n + 1);
       setTestResults((prev) => ({
         ...prev,
         [source.id]: {
@@ -181,7 +233,7 @@ export function SourcesPage() {
       if (err instanceof CloudflareChallengeError) {
         setTestResults((prev) => ({
           ...prev,
-          [source.id]: { status: 'cloudflare', url: err.url },
+          [source.id]: { status: 'cloudflare', url: err.url, probeUrl: err.requestUrl },
         }));
       } else {
         setTestResults((prev) => ({
@@ -314,9 +366,22 @@ export function SourcesPage() {
 
       {/* Dépôts installés */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          Dépôts installés ({repositories.length})
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+            Dépôts installés ({repositories.length})
+          </h2>
+          {repositories.some((r) => !r.url.startsWith('local://')) && (
+            <button
+              type="button"
+              disabled={refreshingAll}
+              onClick={() => void handleRefreshAllRepos()}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshingAll ? 'animate-spin' : ''}`} />
+              Tout actualiser
+            </button>
+          )}
+        </div>
         {repositories.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/50 p-8 text-center">
             <FolderGit2 className="mx-auto h-9 w-9 text-zinc-600" />
@@ -378,13 +443,57 @@ export function SourcesPage() {
 
       {/* Sources configurées */}
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-          Sources disponibles ({sources.length})
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
+            Sources disponibles ({visibleSources.length}
+            {visibleSources.length !== sources.length ? ` / ${sources.length}` : ''})
+          </h2>
+
+          {sources.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="search"
+                  value={sourceQuery}
+                  onChange={(e) => setSourceQuery(e.target.value)}
+                  placeholder="Filtrer les sources..."
+                  className="rounded-xl border border-zinc-800 bg-[#12121a] py-1.5 pl-8 pr-3 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+                />
+              </div>
+              {availableLangs.length > 1 && (
+                <div className="flex items-center gap-1 rounded-xl border border-zinc-800 bg-[#12121a] p-0.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setLangFilter('all')}
+                    className={`rounded-lg px-2 py-1 font-medium ${
+                      langFilter === 'all' ? 'bg-rose-600 text-white' : 'text-zinc-400'
+                    }`}
+                  >
+                    Toutes
+                  </button>
+                  {availableLangs.map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => setLangFilter(lang)}
+                      className={`rounded-lg px-2 py-1 font-medium uppercase ${
+                        langFilter === lang ? 'bg-rose-600 text-white' : 'text-zinc-400'
+                      }`}
+                    >
+                      {lang}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <div className="space-y-3">
-          {sources.map((source) => {
+          {visibleSources.map((source) => {
             const test = testResults[source.id];
             const hasPerm = permissionsMap[source.id] ?? true;
+            const cfUnlocked = sessionNonce >= 0 && isSiteTabProxied(source.baseUrl);
 
             return (
               <div
@@ -402,6 +511,19 @@ export function SourcesPage() {
                         <span className="rounded-md bg-indigo-500/15 px-2 py-0.5 text-[11px] font-medium text-indigo-300">
                           modèle : {source.extendsId}
                         </span>
+                      )}
+                      {cfUnlocked && (
+                        <button
+                          type="button"
+                          title="Session Cloudflare active via onglet — cliquer pour réinitialiser"
+                          onClick={() => {
+                            clearSiteTabProxied(source.baseUrl);
+                            setSessionNonce((n) => n + 1);
+                          }}
+                          className="rounded-md bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/25"
+                        >
+                          Session CF active
+                        </button>
                       )}
                       {!hasPerm && (
                         <button
@@ -470,6 +592,7 @@ export function SourcesPage() {
                   <CloudflareBanner
                     sourceName={source.name}
                     url={test.url}
+                    probeUrl={test.probeUrl}
                     compact
                     onRetry={() => void handleTestSource(source)}
                   />
