@@ -25,6 +25,7 @@ import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { CustomSelect } from '@/src/components/CustomSelect';
+import { SourceIcon } from '@/src/components/SourceIcon';
 import { DEFAULT_APP_SETTINGS, db, normalizeMangaKey } from '@/src/core/db/db';
 import {
   addCustomCategory,
@@ -494,6 +495,14 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                     value: link.sourceId,
                     label: s ? s.name : link.sourceId,
                     badge: s ? s.lang.toUpperCase() : undefined,
+                    icon: s ? (
+                      <SourceIcon
+                        size="xs"
+                        name={s.name}
+                        iconUrl={s.resolvedConfig?.iconUrl}
+                        baseUrl={s.baseUrl}
+                      />
+                    ) : undefined,
                   };
                 })}
                 onChange={(val) => {

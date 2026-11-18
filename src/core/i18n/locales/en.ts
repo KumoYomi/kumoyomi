@@ -108,6 +108,11 @@ export const en = {
   'explore.loadMore': 'Load more series',
   'explore.networkError': 'Network error',
   'explore.catalogueError': 'Failed to load catalogue',
+  'explore.sourceBarLabel': 'Sources:',
+  'explore.allSourcesToggle': 'All sources ({{count}})',
+  'explore.favoritesOnlyHint': 'Star any source (★) to pin it directly here.',
+  'explore.pinFavorite': 'Pin to favorite sources',
+  'explore.unpinFavorite': 'Remove from favorite sources',
 
   // MangaDetailPage
   'manga.notFound': 'Manga not found in local database.',

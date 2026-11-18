@@ -1,6 +1,7 @@
 import { Check, ChevronDown } from 'lucide-react';
 import {
   type KeyboardEvent,
+  type ReactNode,
   useEffect,
   useId,
   useLayoutEffect,
@@ -12,6 +13,7 @@ export interface SelectOption<T extends string = string> {
   value: T;
   label: string;
   badge?: string;
+  icon?: ReactNode;
 }
 
 interface CustomSelectProps<T extends string = string> {
@@ -145,7 +147,10 @@ export function CustomSelect<T extends string = string>({
         onKeyDown={handleTriggerKeyDown}
         className={`flex w-full items-center justify-between gap-2 rounded-xl border border-[var(--ky-border)] bg-[var(--ky-surface-2)] font-medium text-[var(--ky-text)] transition hover:border-[var(--ky-border-strong)] hover:bg-[var(--ky-surface-hover)] focus:border-[var(--ky-accent-ring)] focus:outline-none focus:ring-2 focus:ring-[var(--ky-accent-soft)] disabled:cursor-not-allowed disabled:opacity-50 ${paddingClass} ${buttonClassName}`}
       >
-        <span className="truncate">{selectedOption?.label ?? ''}</span>
+        <span className="flex min-w-0 items-center gap-2 truncate">
+          {selectedOption?.icon}
+          <span className="truncate">{selectedOption?.label ?? ''}</span>
+        </span>
         <ChevronDown
           className={`h-3.5 w-3.5 shrink-0 text-[var(--ky-text-muted)] transition-transform duration-150 ${
             open ? 'rotate-180 text-[var(--ky-accent-text)]' : ''
@@ -185,7 +190,10 @@ export function CustomSelect<T extends string = string>({
                       : 'text-[var(--ky-text-secondary)] hover:bg-[var(--ky-surface-hover)] hover:text-[var(--ky-text-heading)]'
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{opt.label}</span>
+                <span className="flex min-w-0 flex-1 items-center gap-2 truncate">
+                  {opt.icon}
+                  <span className="truncate">{opt.label}</span>
+                </span>
                 <span className="flex shrink-0 items-center gap-1.5">
                   {opt.badge && (
                     <span className="rounded-md bg-black/20 px-1.5 py-0.5 font-mono text-[10px] opacity-80">

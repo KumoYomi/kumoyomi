@@ -108,6 +108,11 @@ export const zh: TranslationDict = {
   'explore.loadMore': '加载更多',
   'explore.networkError': '网络错误',
   'explore.catalogueError': '加载目录失败',
+  'explore.sourceBarLabel': '图源：',
+  'explore.allSourcesToggle': '全部图源 ({{count}})',
+  'explore.favoritesOnlyHint': '点击 ★ 可将常用图源固定到此快捷栏。',
+  'explore.pinFavorite': '添加到收藏图源',
+  'explore.unpinFavorite': '从收藏图源移除',
 
   // MangaDetailPage
   'manga.notFound': '本地数据库中未找到该漫画。',

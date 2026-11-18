@@ -111,6 +111,11 @@ export const fr: TranslationDict = {
   'explore.loadMore': 'Charger plus de séries',
   'explore.networkError': 'Erreur réseau',
   'explore.catalogueError': 'Erreur de chargement du catalogue',
+  'explore.sourceBarLabel': 'Sources :',
+  'explore.allSourcesToggle': 'Toutes les sources ({{count}})',
+  'explore.favoritesOnlyHint': 'Cliquez sur ★ pour épingler vos sources favorites dans cette barre.',
+  'explore.pinFavorite': 'Ajouter aux sources favorites',
+  'explore.unpinFavorite': 'Retirer des sources favorites',
 
   // MangaDetailPage
   'manga.notFound': 'Manga introuvable dans la base locale.',

@@ -9,6 +9,7 @@ export interface KeiyoushiSourceMetadata {
   name: string;
   lang: string;
   baseUrl: string;
+  iconUrl?: string;
   nsfw?: boolean;
   theme?: string;
 }
@@ -2290,6 +2291,7 @@ export function buildThemeSourceConfig(
     lang: meta.lang,
     extends: themeId,
     baseUrl: meta.baseUrl,
+    ...(meta.iconUrl ? { iconUrl: meta.iconUrl } : {}),
     ...(meta.nsfw ? { nsfw: true } : {}),
     ...(Object.keys(vars).length > 0 ? { vars } : {}),
   };

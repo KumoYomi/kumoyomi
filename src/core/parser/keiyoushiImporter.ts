@@ -43,6 +43,7 @@ export interface KeiyoushiCatalogEntry {
   name: string;
   lang: string;
   baseUrl: string;
+  iconUrl?: string;
   nsfw: boolean;
   theme?: string;
   compatible: boolean;
@@ -375,12 +376,15 @@ export async function scanKeiyoushiCatalog(
       existingIds.has(meta.id) ||
       existingBaseUrls.has(meta.baseUrl.replace(/\/+$/, '').toLowerCase());
 
+    const iconUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${encodeURIComponent(branch)}/${parsed.langPath}/${encodeURIComponent(dir.name)}/res/mipmap-xxxhdpi/ic_launcher.png`;
+
     const entry: KeiyoushiCatalogEntry = {
       slug: meta.slug,
       id: meta.id,
       name: meta.name,
       lang: meta.lang,
       baseUrl: meta.baseUrl,
+      iconUrl,
       nsfw: Boolean(meta.nsfw),
       theme: meta.theme,
       compatible: compat.compatible,
@@ -395,6 +399,24 @@ export async function scanKeiyoushiCatalog(
     if (a.compatible !== b.compatible) return a.compatible ? -1 : 1;
     return a.name.localeCompare(b.name, 'fr');
   });
+
+  // Rétro-remplit l'icône Keiyoushi sur les sources déjà installées qui n'avaient pas encore iconUrl
+  const iconById = new Map(entries.filter((e) => e.iconUrl).map((e) => [e.id, e.iconUrl!]));
+  const toBackfill = existingSources.filter(
+    (s) => !s.resolvedConfig.iconUrl && iconById.has(s.id),
+  );
+  if (toBackfill.length > 0) {
+    await db.sources.bulkPut(
+      toBackfill.map((s) => {
+        const nextIcon = iconById.get(s.id)!;
+        return {
+          ...s,
+          rawConfig: { ...s.rawConfig, iconUrl: nextIcon },
+          resolvedConfig: { ...s.resolvedConfig, iconUrl: nextIcon },
+        };
+      }),
+    );
+  }
 
   const target: KeiyoushiRepoTarget = {
     ...parsed,
@@ -494,6 +516,7 @@ export async function importSelectedKeiyoushiSources(
 
   const existingSources = await db.sources.toArray();
   const existingEnabledById = new Map(existingSources.map((s) => [s.id, s.enabled]));
+  const existingFavoriteById = new Map(existingSources.map((s) => [s.id, Boolean(s.favorite)]));
 
   const now = Date.now();
   const templatesToSave = new Map<string, TemplateRecord>();
@@ -511,6 +534,7 @@ export async function importSelectedKeiyoushiSources(
         name: entry.name,
         lang: entry.lang,
         baseUrl: entry.baseUrl,
+        ...(entry.iconUrl ? { iconUrl: entry.iconUrl } : {}),
         nsfw: entry.nsfw,
         theme: entry.theme,
       };
@@ -552,6 +576,10 @@ export async function importSelectedKeiyoushiSources(
         return;
       }
 
+      if (entry.iconUrl && !rawConfig.iconUrl) {
+        rawConfig.iconUrl = entry.iconUrl;
+      }
+
       const validatedRaw = validateRawSourceConfig(rawConfig);
       const resolved = resolveSourceWithTemplates(validatedRaw, templateMap);
 
@@ -562,6 +590,7 @@ export async function importSelectedKeiyoushiSources(
         lang: resolved.lang,
         baseUrl: resolved.baseUrl,
         enabled: existingEnabledById.get(resolved.id) ?? true,
+        favorite: existingFavoriteById.get(resolved.id) ?? false,
         extendsId: resolved.extends,
         rawConfig: validatedRaw,
         resolvedConfig: resolved,

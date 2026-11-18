@@ -53,6 +53,7 @@ export interface InstalledSourceRecord {
   lang: string;
   baseUrl: string;
   enabled: boolean;
+  favorite?: boolean;
   extendsId?: string;
   rawConfig: RawSourceConfig;
   resolvedConfig: SourceConfig;

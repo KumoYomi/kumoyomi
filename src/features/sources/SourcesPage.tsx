@@ -16,6 +16,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Star,
   Trash2,
   Wrench,
   X,
@@ -25,6 +26,7 @@ import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { CustomSelect } from '@/src/components/CustomSelect';
+import { SourceIcon } from '@/src/components/SourceIcon';
 import { db } from '@/src/core/db/db';
 import {
   checkGlobalOriginPermission,
@@ -54,6 +56,7 @@ import {
   removeRepository,
   removeSource,
   setSourceEnabled,
+  setSourceFavorite,
 } from '@/src/core/parser/repositoryService';
 import type { InstalledSourceRecord } from '@/src/core/types/manga';
 import type {
@@ -1141,6 +1144,12 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                       onChange={() => toggleKeiyoushiSelection(entry.slug)}
                       className="h-4 w-4 shrink-0 rounded accent-sky-400"
                     />
+                    <SourceIcon
+                      size="sm"
+                      name={entry.name}
+                      iconUrl={entry.iconUrl}
+                      baseUrl={entry.baseUrl}
+                    />
                     <span className="ky-heading min-w-0 flex-1 truncate font-semibold">
                       {entry.name}
                     </span>
@@ -1191,6 +1200,13 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                     checked={checked}
                     onChange={() => toggleKeiyoushiSelection(entry.slug)}
                     className="mt-0.5 h-4 w-4 shrink-0 rounded accent-sky-400"
+                  />
+                  <SourceIcon
+                    size="sm"
+                    name={entry.name}
+                    iconUrl={entry.iconUrl}
+                    baseUrl={entry.baseUrl}
+                    className="mt-0.5"
                   />
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -1460,7 +1476,27 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
+                      <SourceIcon
+                        size="md"
+                        name={source.name}
+                        iconUrl={source.resolvedConfig?.iconUrl}
+                        baseUrl={source.baseUrl}
+                      />
                       <h3 className="text-base font-semibold text-white">{source.name}</h3>
+                      <button
+                        type="button"
+                        title={
+                          source.favorite ? t('explore.unpinFavorite') : t('explore.pinFavorite')
+                        }
+                        onClick={() => void setSourceFavorite(source.id, !source.favorite)}
+                        className={`rounded-lg p-1 transition hover:bg-zinc-800 ${
+                          source.favorite ? 'text-amber-400' : 'text-zinc-500 hover:text-amber-300'
+                        }`}
+                      >
+                        <Star
+                          className={`h-4 w-4 ${source.favorite ? 'fill-amber-400' : ''}`}
+                        />
+                      </button>
                       <span className="rounded-md bg-zinc-800 px-2 py-0.5 text-[11px] font-semibold uppercase text-zinc-300">
                         {source.lang}
                       </span>

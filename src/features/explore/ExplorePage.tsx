@@ -1,12 +1,14 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
   AlertCircle,
+  ChevronDown,
   Compass,
   FolderGit2,
   Layers,
   Loader2,
   Search,
   Sparkles,
+  Star,
   TrendingUp,
 } from 'lucide-react';
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,12 +16,14 @@ import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { CustomSelect } from '@/src/components/CustomSelect';
+import { SourceIcon } from '@/src/components/SourceIcon';
 import { db, normalizeMangaKey } from '@/src/core/db/db';
 import { upsertMangaFromCatalogueItem } from '@/src/core/db/mangaRepository';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
 import { useTranslation } from '@/src/core/i18n';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
+import { setSourceFavorite } from '@/src/core/parser/repositoryService';
 import type { InstalledSourceRecord } from '@/src/core/types/manga';
 import type { ParsedCatalogueItem } from '@/src/core/types/source';
 
@@ -59,6 +63,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
   const [searchStates, setSearchStates] = useState<Record<string, SourceSearchState>>({});
 
   const [selectedSourceId, setSelectedSourceId] = useState<string>(initialSourceId ?? '');
+  const [showAllSourcesDrawer, setShowAllSourcesDrawer] = useState(false);
   const [browseMode, setBrowseMode] = useState<'popular' | 'latest'>('popular');
   const [browsePage, setBrowsePage] = useState(1);
   const [browseItems, setBrowseItems] = useState<ParsedCatalogueItem[]>([]);
@@ -70,17 +75,36 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
 
   const searchRunId = useRef(0);
 
+  const orderedSources = useMemo(
+    () =>
+      [...enabledSources].sort((a, b) => {
+        if (Boolean(a.favorite) !== Boolean(b.favorite)) return a.favorite ? -1 : 1;
+        return a.name.localeCompare(b.name, 'fr');
+      }),
+    [enabledSources],
+  );
+  const favoriteSources = useMemo(
+    () => orderedSources.filter((s) => Boolean(s.favorite)),
+    [orderedSources],
+  );
+  const activeBrowseSource = selectedSourceId ? sourceById.get(selectedSourceId) : orderedSources[0];
+  const barSources = useMemo(() => {
+    if (favoriteSources.length === 0) return orderedSources;
+    if (activeBrowseSource && !activeBrowseSource.favorite) {
+      return [...favoriteSources, activeBrowseSource];
+    }
+    return favoriteSources;
+  }, [favoriteSources, orderedSources, activeBrowseSource]);
+
   useEffect(() => {
     if (initialSourceId) {
       setSelectedSourceId(initialSourceId);
       return;
     }
-    if (!selectedSourceId && enabledSources[0]) {
-      setSelectedSourceId(enabledSources[0].id);
+    if (!selectedSourceId && orderedSources[0]) {
+      setSelectedSourceId(orderedSources[0].id);
     }
-  }, [initialSourceId, enabledSources, selectedSourceId]);
-
-  const activeBrowseSource = selectedSourceId ? sourceById.get(selectedSourceId) : enabledSources[0];
+  }, [initialSourceId, orderedSources, selectedSourceId]);
 
   async function runParallelSearch(queryText: string) {
     const trimmed = queryText.trim();
@@ -359,7 +383,16 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                         : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
                 }`}
               >
-                {st.status === 'loading' && <Loader2 className="h-3 w-3 animate-spin" />}
+                {st.status === 'loading' ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <SourceIcon
+                    size="xs"
+                    name={st.source.name}
+                    iconUrl={st.source.resolvedConfig?.iconUrl}
+                    baseUrl={st.source.baseUrl}
+                  />
+                )}
                 <span>{st.source.name}</span>
                 {st.status === 'done' && <span>({st.items.length})</span>}
                 {st.status === 'cloudflare' && <span>(Cloudflare)</span>}
@@ -462,50 +495,176 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
         </section>
       ) : (
         <section className="space-y-5">
-          {/* Barre de sélection source & tri */}
-          <div className="ky-surface flex flex-col gap-3 rounded-2xl border p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="ky-muted px-1 text-xs font-medium">
-                {t('explore.catalogueLabel')}
-              </span>
-              <CustomSelect
-                ariaLabel={t('explore.catalogueLabel')}
-                value={activeBrowseSource?.id ?? ''}
-                options={enabledSources.map((src) => ({
-                  value: src.id,
-                  label: src.name,
-                  badge: src.lang.toUpperCase(),
-                }))}
-                onChange={setSelectedSourceId}
-              />
+          {/* Barre de sélection directe (favoris + icônes) + menu complet + tri */}
+          <div className="ky-surface space-y-3 rounded-2xl border p-3">
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="ky-muted px-1 text-xs font-medium">
+                  {t('explore.catalogueLabel')}
+                </span>
+                <CustomSelect
+                  ariaLabel={t('explore.catalogueLabel')}
+                  value={activeBrowseSource?.id ?? ''}
+                  options={orderedSources.map((src) => ({
+                    value: src.id,
+                    label: src.favorite ? `★ ${src.name}` : src.name,
+                    badge: src.lang.toUpperCase(),
+                    icon: (
+                      <SourceIcon
+                        size="sm"
+                        name={src.name}
+                        iconUrl={src.resolvedConfig?.iconUrl}
+                        baseUrl={src.baseUrl}
+                      />
+                    ),
+                  }))}
+                  onChange={(val) => {
+                    setSelectedSourceId(val);
+                    setShowAllSourcesDrawer(false);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAllSourcesDrawer((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                    showAllSourcesDrawer
+                      ? 'ky-chip-active border-sky-400/50'
+                      : 'ky-chip hover:text-[var(--ky-text-heading)]'
+                  }`}
+                >
+                  <span>{t('explore.allSourcesToggle', { count: orderedSources.length })}</span>
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 transition-transform ${showAllSourcesDrawer ? 'rotate-180' : ''}`}
+                  />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 self-start rounded-xl bg-[var(--ky-surface-2)] p-1 sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setBrowseMode('popular')}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    browseMode === 'popular'
+                      ? 'ky-btn-primary'
+                      : 'text-[var(--ky-text-muted)] hover:text-[var(--ky-text-heading)]'
+                  }`}
+                >
+                  <TrendingUp className="h-3.5 w-3.5" />
+                  {t('explore.popular')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBrowseMode('latest')}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    browseMode === 'latest'
+                      ? 'ky-btn-primary'
+                      : 'text-[var(--ky-text-muted)] hover:text-[var(--ky-text-heading)]'
+                  }`}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t('explore.latest')}
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5 self-start rounded-xl bg-[var(--ky-surface-2)] p-1 sm:self-auto">
-              <button
-                type="button"
-                onClick={() => setBrowseMode('popular')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  browseMode === 'popular'
-                    ? 'ky-btn-primary'
-                    : 'text-[var(--ky-text-muted)] hover:text-[var(--ky-text-heading)]'
-                }`}
-              >
-                <TrendingUp className="h-3.5 w-3.5" />
-                {t('explore.popular')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setBrowseMode('latest')}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  browseMode === 'latest'
-                    ? 'ky-btn-primary'
-                    : 'text-[var(--ky-text-muted)] hover:text-[var(--ky-text-heading)]'
-                }`}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {t('explore.latest')}
-              </button>
+            {/* Barre directe des sources (icônes cliquables + favoris) */}
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-[var(--ky-border)] pt-2.5">
+              <span className="ky-soft mr-1 text-[11px] font-medium">
+                {t('explore.sourceBarLabel')}
+              </span>
+              {barSources.map((src) => {
+                const isActive = src.id === activeBrowseSource?.id;
+                return (
+                  <div
+                    key={src.id}
+                    className={`inline-flex items-center rounded-xl border text-xs transition ${
+                      isActive
+                        ? 'border-sky-400/60 bg-sky-500/15 text-[var(--ky-text-heading)]'
+                        : 'border-[var(--ky-border)] bg-[var(--ky-surface-2)] text-[var(--ky-text-muted)] hover:border-[var(--ky-border-strong)] hover:text-[var(--ky-text-heading)]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSourceId(src.id)}
+                      className="inline-flex items-center gap-2 py-1.5 pl-2.5 pr-1.5 font-medium"
+                    >
+                      <SourceIcon
+                        size="sm"
+                        name={src.name}
+                        iconUrl={src.resolvedConfig?.iconUrl}
+                        baseUrl={src.baseUrl}
+                      />
+                      <span className="max-w-[130px] truncate">{src.name}</span>
+                      <span className="rounded bg-black/25 px-1 py-0.5 font-mono text-[9px] uppercase opacity-75">
+                        {src.lang}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      title={src.favorite ? t('explore.unpinFavorite') : t('explore.pinFavorite')}
+                      onClick={() => void setSourceFavorite(src.id, !src.favorite)}
+                      className={`mr-1 rounded-lg p-1 transition hover:bg-black/20 ${
+                        src.favorite ? 'text-amber-400' : 'text-zinc-500 hover:text-amber-300'
+                      }`}
+                    >
+                      <Star className={`h-3.5 w-3.5 ${src.favorite ? 'fill-amber-400' : ''}`} />
+                    </button>
+                  </div>
+                );
+              })}
+              {favoriteSources.length === 0 && (
+                <span className="ky-soft ml-1 text-[11px]">{t('explore.favoritesOnlyHint')}</span>
+              )}
             </div>
+
+            {/* Panneau dépliable avec toutes les sources en barres + icônes + favoris */}
+            {showAllSourcesDrawer && (
+              <div className="grid grid-cols-1 gap-1.5 border-t border-[var(--ky-border)] pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                {orderedSources.map((src) => {
+                  const isActive = src.id === activeBrowseSource?.id;
+                  return (
+                    <div
+                      key={src.id}
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-xs transition ${
+                        isActive
+                          ? 'border-sky-400/60 bg-sky-500/15 text-[var(--ky-text-heading)]'
+                          : 'border-[var(--ky-border)] bg-[var(--ky-surface-2)] text-[var(--ky-text)] hover:border-sky-400/40'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSourceId(src.id);
+                          setShowAllSourcesDrawer(false);
+                        }}
+                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left font-medium"
+                      >
+                        <SourceIcon
+                          size="sm"
+                          name={src.name}
+                          iconUrl={src.resolvedConfig?.iconUrl}
+                          baseUrl={src.baseUrl}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{src.name}</span>
+                        <span className="rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px] uppercase opacity-75">
+                          {src.lang}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        title={src.favorite ? t('explore.unpinFavorite') : t('explore.pinFavorite')}
+                        onClick={() => void setSourceFavorite(src.id, !src.favorite)}
+                        className={`rounded-lg p-1.5 transition hover:bg-black/25 ${
+                          src.favorite ? 'text-amber-400' : 'text-zinc-500 hover:text-amber-300'
+                        }`}
+                      >
+                        <Star className={`h-3.5 w-3.5 ${src.favorite ? 'fill-amber-400' : ''}`} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {browseError?.kind === 'cloudflare' && activeBrowseSource && (

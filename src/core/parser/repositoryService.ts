@@ -109,6 +109,7 @@ export async function addOrRefreshRepositoryByUrl(rawInputUrl: string): Promise<
 
   const existingSources = await db.sources.toArray();
   const existingEnabledById = new Map(existingSources.map((s) => [s.id, s.enabled]));
+  const existingFavoriteById = new Map(existingSources.map((s) => [s.id, Boolean(s.favorite)]));
 
   const resolvedRecords: InstalledSourceRecord[] = rawSources.map((rawSrc) => {
     const resolved = resolveSourceWithTemplates(rawSrc, templateMap);
@@ -119,6 +120,7 @@ export async function addOrRefreshRepositoryByUrl(rawInputUrl: string): Promise<
       lang: resolved.lang,
       baseUrl: resolved.baseUrl,
       enabled: existingEnabledById.get(resolved.id) ?? true,
+      favorite: existingFavoriteById.get(resolved.id) ?? false,
       extendsId: resolved.extends,
       rawConfig: rawSrc,
       resolvedConfig: resolved,
@@ -337,4 +339,8 @@ export async function removeSource(sourceId: string): Promise<void> {
 export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
   await db.sources.update(sourceId, { enabled, updatedAt: Date.now() });
   await syncAllSourceRulesToBackground();
+}
+
+export async function setSourceFavorite(sourceId: string, favorite: boolean): Promise<void> {
+  await db.sources.update(sourceId, { favorite, updatedAt: Date.now() });
 }
