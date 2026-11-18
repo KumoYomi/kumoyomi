@@ -1,0 +1,166 @@
+{
+  "id": "mangathemesia",
+  "name": "Modèle MangaThemesia / MangaStream",
+  "lang": "fr",
+  "vars": {
+    "mangaUrlDirectory": "manga"
+  },
+  "popular": {
+    "request": {
+      "method": "GET",
+      "url": "{{baseUrl}}/{{vars.mangaUrlDirectory}}/",
+      "queryParams": {
+        "page": "{{page}}",
+        "order": "popular"
+      }
+    },
+    "itemSelector": ".bs .bsx",
+    "hasNextPageSelector": "a.next.page-numbers, .hpage a.r",
+    "fields": {
+      "title": {
+        "selector": "a",
+        "attr": ["title", "text"]
+      },
+      "url": {
+        "selector": "a",
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "cover": {
+        "selector": "img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      },
+      "latestChapter": {
+        "selector": ".epxs",
+        "attr": "text"
+      }
+    }
+  },
+  "latest": {
+    "request": {
+      "method": "GET",
+      "url": "{{baseUrl}}/{{vars.mangaUrlDirectory}}/",
+      "queryParams": {
+        "page": "{{page}}",
+        "order": "update"
+      }
+    },
+    "itemSelector": ".bs .bsx",
+    "hasNextPageSelector": "a.next.page-numbers, .hpage a.r",
+    "fields": {
+      "title": {
+        "selector": "a",
+        "attr": ["title", "text"]
+      },
+      "url": {
+        "selector": "a",
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "cover": {
+        "selector": "img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      },
+      "latestChapter": {
+        "selector": ".epxs",
+        "attr": "text"
+      }
+    }
+  },
+  "search": {
+    "request": {
+      "method": "GET",
+      "url": "{{baseUrl}}/page/{{page}}/",
+      "queryParams": {
+        "s": "{{query}}"
+      }
+    },
+    "itemSelector": ".bs .bsx",
+    "hasNextPageSelector": "a.next.page-numbers, .hpage a.r",
+    "fields": {
+      "title": {
+        "selector": "a",
+        "attr": ["title", "text"]
+      },
+      "url": {
+        "selector": "a",
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "cover": {
+        "selector": "img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      }
+    }
+  },
+  "mangaDetails": {
+    "request": {
+      "method": "GET",
+      "url": "{{mangaUrl}}"
+    },
+    "fields": {
+      "title": {
+        "selector": "h1.entry-title",
+        "attr": "text"
+      },
+      "cover": {
+        "selector": ".thumb img",
+        "attr": ["data-src", "src"],
+        "absoluteUrl": true
+      },
+      "author": {
+        "selector": ".imptdt, .fmed b",
+        "labelMatch": ["auteur", "author"],
+        "attr": "text"
+      },
+      "status": {
+        "selector": ".imptdt, .tsinfo .imptdt",
+        "labelMatch": ["statut", "status"],
+        "attr": "text"
+      },
+      "description": {
+        "selector": ".entry-content[itemprop='description'] p, div[itemprop='description'] p",
+        "attr": "text",
+        "joinAll": "\n\n"
+      },
+      "genres": {
+        "selector": ".mgen a, span.mgen a",
+        "attr": "text",
+        "joinAll": ", "
+      }
+    }
+  },
+  "chapters": {
+    "fallbackInline": true,
+    "itemSelector": "#chapterlist li",
+    "fields": {
+      "title": {
+        "selector": "span.chapternum, .eph-num a",
+        "attr": "text"
+      },
+      "url": {
+        "selector": "a",
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "date": {
+        "selector": "span.chapterdate",
+        "attr": "text"
+      }
+    }
+  },
+  "pages": {
+    "request": {
+      "method": "GET",
+      "url": "{{chapterUrl}}"
+    },
+    "itemSelector": "#readerarea img",
+    "imageUrl": {
+      "attr": ["data-src", "data-lazy-src", "src"],
+      "absoluteUrl": true
+    }
+  }
+}

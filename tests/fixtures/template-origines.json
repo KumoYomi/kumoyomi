@@ -1,0 +1,231 @@
+{
+  "id": "origines",
+  "name": "Modèle Origines (WordPress Child-Origines)",
+  "lang": "fr",
+  "vars": {
+    "mangaPath": "oeuvre"
+  },
+  "popular": {
+    "request": {
+      "method": "POST",
+      "url": "{{baseUrl}}/wp-admin/admin-ajax.php",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      "formBody": {
+        "action": "madara_child_catalogue",
+        "s": "",
+        "genres": "",
+        "statut": "tous",
+        "note": "0",
+        "origine": "",
+        "tri": "populaire",
+        "chmin": "0",
+        "chmax": "0",
+        "page": "{{page}}",
+        "auteur": "",
+        "artiste": "",
+        "annee": ""
+      },
+      "responseType": "json-html",
+      "jsonHtmlPath": "data.html"
+    },
+    "itemSelector": "a.ori-card",
+    "hasNextPageJsonPath": "data.more",
+    "fields": {
+      "title": {
+        "selector": "span.ori-card-title",
+        "attr": "text"
+      },
+      "url": {
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "cover": {
+        "selector": "img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      }
+    }
+  },
+  "latest": {
+    "request": {
+      "method": "POST",
+      "url": "{{baseUrl}}/wp-admin/admin-ajax.php",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      "formBody": {
+        "action": "madara_child_catalogue",
+        "s": "",
+        "genres": "",
+        "statut": "tous",
+        "note": "0",
+        "origine": "",
+        "tri": "recents",
+        "chmin": "0",
+        "chmax": "0",
+        "page": "{{page}}",
+        "auteur": "",
+        "artiste": "",
+        "annee": ""
+      },
+      "responseType": "json-html",
+      "jsonHtmlPath": "data.html"
+    },
+    "itemSelector": "a.ori-card",
+    "hasNextPageJsonPath": "data.more",
+    "fields": {
+      "title": {
+        "selector": "span.ori-card-title",
+        "attr": "text"
+      },
+      "url": {
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "cover": {
+        "selector": "img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      }
+    }
+  },
+  "search": {
+    "request": {
+      "method": "POST",
+      "url": "{{baseUrl}}/wp-admin/admin-ajax.php",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      "formBody": {
+        "action": "madara_child_catalogue",
+        "s": "{{query}}",
+        "genres": "",
+        "statut": "tous",
+        "note": "0",
+        "origine": "",
+        "tri": "recents",
+        "chmin": "0",
+        "chmax": "0",
+        "page": "{{page}}",
+        "auteur": "",
+        "artiste": "",
+        "annee": ""
+      },
+      "responseType": "json-html",
+      "jsonHtmlPath": "data.html"
+    },
+    "itemSelector": "a.ori-card",
+    "hasNextPageJsonPath": "data.more",
+    "fields": {
+      "title": {
+        "selector": "span.ori-card-title",
+        "attr": "text"
+      },
+      "url": {
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "cover": {
+        "selector": "img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      }
+    }
+  },
+  "mangaDetails": {
+    "request": {
+      "method": "GET",
+      "url": "{{mangaUrl}}"
+    },
+    "fields": {
+      "title": {
+        "selector": "h1.ori-sr-title",
+        "attr": "text"
+      },
+      "cover": {
+        "selector": "div.ori-sr-cover img",
+        "attr": ["data-src", "data-lazy-src", "src"],
+        "absoluteUrl": true
+      },
+      "author": {
+        "selector": "div.ori-sr-infos dt",
+        "labelMatch": ["auteur", "scénario"],
+        "attr": "text"
+      },
+      "artist": {
+        "selector": "div.ori-sr-infos dt",
+        "labelMatch": ["artiste", "dessin"],
+        "attr": "text"
+      },
+      "status": {
+        "selector": "div.ori-sr-infos dt",
+        "labelMatch": ["statut", "status"],
+        "attr": "text"
+      },
+      "description": {
+        "selector": "div.ori-sr-syn-texte p",
+        "attr": "text",
+        "joinAll": "\n\n"
+      },
+      "genres": {
+        "selector": "div.ori-sr-genres a.ori-sr-genre",
+        "attr": "text",
+        "joinAll": ", "
+      },
+      "altTitles": {
+        "selector": "div.ori-sr-infos dt",
+        "labelMatch": ["nom alternatif", "alternative"],
+        "attr": "text"
+      }
+    },
+    "statusMap": {
+      "en cours": "ongoing",
+      "terminé": "completed",
+      "en pause": "hiatus",
+      "abandonné": "cancelled",
+      "annulé": "cancelled"
+    }
+  },
+  "chapters": {
+    "request": {
+      "method": "POST",
+      "url": "{{mangaUrlSlash}}ajax/chapters/",
+      "headers": {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    },
+    "fallbackInline": true,
+    "itemSelector": "div.ori-chl-row",
+    "fields": {
+      "title": {
+        "selector": ["span.ori-chl-nom", "a.ori-chl-corps"],
+        "attr": "text"
+      },
+      "url": {
+        "selector": "a.ori-chl-corps",
+        "attr": "href",
+        "absoluteUrl": true
+      },
+      "date": {
+        "selector": "span.ori-chl-date",
+        "attr": ["title", "text"]
+      }
+    }
+  },
+  "pages": {
+    "request": {
+      "method": "GET",
+      "url": "{{chapterUrl}}",
+      "queryParams": {
+        "style": "list"
+      }
+    },
+    "itemSelector": "div.reading-content img.wp-manga-chapter-img, div.page-break img",
+    "imageUrl": {
+      "attr": ["data-src", "data-lazy-src", "src"],
+      "absoluteUrl": true
+    }
+  }
+}

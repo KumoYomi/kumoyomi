@@ -1,0 +1,120 @@
+name: Build & Release Extension (Chrome + Firefox)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version à publier (ex: 0.2.0). Laisser vide pour utiliser package.json'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Marquer comme pré-version (Pre-release)'
+        type: boolean
+        required: false
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Résoudre la version et le tag
+        id: meta
+        shell: bash
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          elif [ -n "${{ github.event.inputs.version }}" ]; then
+            RAW_VER="${{ github.event.inputs.version }}"
+            VERSION="${RAW_VER#v}"
+            TAG="v${VERSION}"
+          else
+            VERSION="${PKG_VERSION}"
+            BASE_TAG="v${VERSION}"
+            if git rev-parse "$BASE_TAG" >/dev/null 2>&1 || gh release view "$BASE_TAG" >/dev/null 2>&1; then
+              TAG="v${VERSION}-build.${{ github.run_number }}"
+            else
+              TAG="${BASE_TAG}"
+            fi
+          fi
+
+          # Met à jour temporairement la version du manifeste pour cette release si différente
+          if [ "$VERSION" != "$PKG_VERSION" ]; then
+            node -e "
+              const fs = require('fs');
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+              pkg.version = process.argv[1];
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+              const wxt = fs.readFileSync('wxt.config.ts', 'utf8')
+                .replace(/version:\s*'[^']+'/, \"version: '\" + process.argv[1] + \"'\");
+              fs.writeFileSync('wxt.config.ts', wxt);
+            " "$VERSION"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Vérifier les types et les tests
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Construire les archives Chrome & Firefox MV3
+        run: pnpm zip
+
+      - name: Publier la GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CHROME_ZIP=$(ls .output/*-chrome.zip | head -n 1)
+          FIREFOX_ZIP=$(ls .output/*-firefox.zip | head -n 1)
+          PRE_FLAG=""
+          if [ "${{ github.event.inputs.prerelease }}" = "true" ]; then
+            PRE_FLAG="--prerelease"
+          fi
+
+          cat << 'EOF' > /tmp/release-notes.md
+          ## KumoYomi ${{ steps.meta.outputs.tag }}
+
+          ### Installation rapide
+          - **Chrome / Brave / Edge :** téléchargez l'archive `*-chrome.zip`, décompressez-la, ouvrez `chrome://extensions`, activez le **Mode développeur** et cliquez sur **Charger l'extension non empaquetée**.
+          - **Firefox PC :** téléchargez l'archive `*-firefox.zip`, ouvrez `about:debugging#/runtime/this-firefox` → **Charger un module complémentaire temporaire…** et sélectionnez le fichier `.zip` (ou son `manifest.json` décompressé).
+
+          ### Ajouter le dépôt de sources communautaire
+          Dans KumoYomi → **Sources & Dépôts**, collez :
+          `https://github.com/KumoYomi-Sources/extensions-source`
+          EOF
+
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.meta.outputs.tag }}" "$CHROME_ZIP" "$FIREFOX_ZIP" --clobber
+          else
+            gh release create "${{ steps.meta.outputs.tag }}" \
+              "$CHROME_ZIP" "$FIREFOX_ZIP" \
+              --title "KumoYomi ${{ steps.meta.outputs.tag }}" \
+              --notes-file /tmp/release-notes.md \
+              $PRE_FLAG
+          fi

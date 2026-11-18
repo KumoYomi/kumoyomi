@@ -1,0 +1,10 @@
+{
+  "id": "demo-origines-fr",
+  "name": "Demo Origines FR",
+  "lang": "fr",
+  "extends": "origines",
+  "baseUrl": "https://demo-origines.example",
+  "vars": {
+    "mangaPath": "oeuvre"
+  }
+}
