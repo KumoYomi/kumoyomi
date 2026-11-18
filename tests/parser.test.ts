@@ -1966,5 +1966,31 @@ describe('Keiyoushi / Mihon FR Importer & Compiler', () => {
       'https://data.sm-demo.example/demo-series/32209/583837/2_two.jpg',
     ]);
     expect(smPages[0]?.headers?.Referer).toBe('https://www.sm-demo.example/lecture-en-ligne/Demo-Chapitre-1_583837.html');
+
+    // Verify blobImageLoader credentials:'omit' fallback when credentials:'include' hits CORS '*' TypeError
+    const origCreateObjectUrl = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => 'blob:mock-omit-url');
+    try {
+      const omitFetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.credentials === 'include') {
+          throw new TypeError('Failed to fetch');
+        }
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        });
+      });
+      vi.stubGlobal('fetch', omitFetchMock);
+      const blobUrl = await fetchImageAsBlobUrl(
+        'https://cdn-wildcard.example/page-1.jpg',
+        'https://sm-demo.example/chapter-1',
+        'test-omit-fallback',
+      );
+      expect(blobUrl).toBe('blob:mock-omit-url');
+      expect(omitFetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      revokeScopeBlobUrls('test-omit-fallback');
+      URL.createObjectURL = origCreateObjectUrl;
+    }
   });
 });

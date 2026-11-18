@@ -150,7 +150,22 @@ async function downloadImageBlobOnce(imageUrl: string, refererUrl?: string): Pro
     clearSiteTabProxied(imageUrl);
   }
 
-  const response = await fetch(imageUrl, { credentials: 'include' });
+  let response: Response;
+  try {
+    response = await fetch(imageUrl, { credentials: 'include' });
+  } catch {
+    // Repli sans cookies si le CDN retourne Access-Control-Allow-Origin: * (ex: data2.scan-manga.com)
+    try {
+      response = await fetch(imageUrl, { credentials: 'omit' });
+    } catch {
+      const tabRes = await tryFetchImageViaTab(imageUrl, refererUrl);
+      if (tabRes.kind === 'blob') {
+        markSiteTabProxied(imageUrl);
+        return tabRes.blob;
+      }
+      throw Object.assign(new Error('Network error fetching image'), { retryable: true });
+    }
+  }
   if (response.ok) {
     if (response.url.includes('/lelsec')) {
       throw new Error('Image refused by host');

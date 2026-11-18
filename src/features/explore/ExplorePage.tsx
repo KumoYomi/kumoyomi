@@ -74,6 +74,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
   >(null);
 
   const searchRunId = useRef(0);
+  const browseRunId = useRef(0);
 
   const orderedSources = useMemo(
     () =>
@@ -211,18 +212,25 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
     pageNum: number,
     append: boolean,
   ) {
+    const runId = ++browseRunId.current;
     setBrowseLoading(true);
     setBrowseError(null);
+    if (!append) {
+      setBrowseItems([]);
+      setBrowseHasNext(false);
+    }
     try {
       const pageRes = await runWithAutoCloudflarePopup(() =>
         mode === 'popular'
           ? parserEngine.getPopular(src.resolvedConfig, pageNum)
           : parserEngine.getLatest(src.resolvedConfig, pageNum),
       );
+      if (browseRunId.current !== runId) return;
       setBrowseItems((prev) => (append ? [...prev, ...pageRes.items] : pageRes.items));
       setBrowseHasNext(pageRes.hasNextPage);
       setBrowsePage(pageNum);
     } catch (err) {
+      if (browseRunId.current !== runId) return;
       if (err instanceof CloudflareChallengeError) {
         setBrowseError({ kind: 'cloudflare', url: err.url, probeUrl: err.requestUrl });
       } else {
@@ -232,7 +240,9 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
         });
       }
     } finally {
-      setBrowseLoading(false);
+      if (browseRunId.current === runId) {
+        setBrowseLoading(false);
+      }
     }
   }
 
