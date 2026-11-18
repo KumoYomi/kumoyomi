@@ -202,6 +202,7 @@ export interface ParsedMangaDetails {
   genres: string[];
   altTitles?: string[];
   rawHtml?: string;
+  rawJson?: unknown;
 }
 
 export interface ParsedChapterItem {

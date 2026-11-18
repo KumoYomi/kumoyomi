@@ -251,6 +251,21 @@ function throwCloudflareError(
   });
 }
 
+async function fetchViaOpenTabWithRetry(
+  url: string,
+  init: RequestInit,
+  source: SourceConfig,
+  timeoutMs: number,
+): Promise<{ response: TransportResponse; text: string } | null> {
+  const first = await tryFetchViaOpenTab(url, init, source, timeoutMs);
+  if (!first) return null;
+  if (!isCloudflareResponse(first.response.status, first.response.headers, first.text)) {
+    return first;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  return tryFetchViaOpenTab(url, init, source, timeoutMs);
+}
+
 async function executeTimedFetch(
   url: string,
   init: RequestInit,
@@ -258,7 +273,7 @@ async function executeTimedFetch(
   timeoutMs: number,
 ): Promise<{ response: TransportResponse; text: string }> {
   if (isSiteTabProxied(url)) {
-    const proxied = await tryFetchViaOpenTab(url, init, source, timeoutMs);
+    const proxied = await fetchViaOpenTabWithRetry(url, init, source, timeoutMs);
     if (proxied) {
       if (isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
         throwCloudflareError(source, proxied.response.status, 'tab_blocked');
@@ -303,7 +318,7 @@ async function executeTimedFetch(
   const text = await response.text();
   if (isCloudflareResponse(response.status, response.headers, text)) {
     // Repli automatique sur un onglet déjà ouvert et débloqué du même site (cookies partitionnés / Sec-Fetch-Site)
-    const proxied = await tryFetchViaOpenTab(url, init, source, timeoutMs);
+    const proxied = await fetchViaOpenTabWithRetry(url, init, source, timeoutMs);
     if (proxied && !isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
       markSiteTabProxied(url);
       return proxied;
@@ -327,12 +342,18 @@ async function executeTimedFetch(
   };
 }
 
-export async function fetchSourceResponse(
+interface PreparedSourceRequest {
+  url: string;
+  init: RequestInit;
+  responseType: 'html' | 'json' | 'json-html';
+  cacheKey: string;
+}
+
+function prepareSourceRequest(
   source: SourceConfig,
   reqConfig: RequestConfig,
   vars: Partial<TemplateVariables> = {},
-  timeoutMs = 15_000,
-): Promise<FetchedResponse> {
+): PreparedSourceRequest {
   const fullVars: TemplateVariables = {
     baseUrl: source.baseUrl,
     vars: source.vars,
@@ -351,7 +372,7 @@ export async function fetchSourceResponse(
     }
   }
 
-  const method = reqConfig.method ?? 'GET';
+  const method = (reqConfig.method ?? 'GET').toUpperCase();
   const headers = new Headers();
 
   for (const [k, v] of Object.entries(source.headers ?? {})) {
@@ -378,8 +399,52 @@ export async function fetchSourceResponse(
     }
   }
 
-  const init: RequestInit = { method, headers, body };
-  let { response, text } = await executeTimedFetch(urlObj.toString(), init, source, timeoutMs);
+  const serializedHeaders = Object.entries(serializeHeadersInit(headers))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join('\n');
+  const url = urlObj.toString();
+  const responseType = reqConfig.responseType ?? 'html';
+  const cacheKey = `${method} ${url}\n${serializedHeaders}\n${body ?? ''}`;
+
+  return {
+    url,
+    init: { method, headers, body },
+    responseType,
+    cacheKey,
+  };
+}
+
+export function isSameSourceRequest(
+  source: SourceConfig,
+  reqA: RequestConfig,
+  reqB: RequestConfig,
+  vars: Partial<TemplateVariables> = {},
+): boolean {
+  try {
+    return (
+      prepareSourceRequest(source, reqA, vars).cacheKey ===
+      prepareSourceRequest(source, reqB, vars).cacheKey
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchSourceResponse(
+  source: SourceConfig,
+  reqConfig: RequestConfig,
+  vars: Partial<TemplateVariables> = {},
+  timeoutMs = 15_000,
+): Promise<FetchedResponse> {
+  const fullVars: TemplateVariables = {
+    baseUrl: source.baseUrl,
+    vars: source.vars,
+    ...vars,
+  };
+  const { url, init, responseType } = prepareSourceRequest(source, reqConfig, vars);
+
+  let { response, text } = await executeTimedFetch(url, init, source, timeoutMs);
 
   // Certains sites retournent HTTP 403 tant qu'un cookie de session initial n'a pas été déposé via warmupUrl.
   if (response.status === 403 && source.warmupUrl) {
@@ -387,7 +452,7 @@ export async function fetchSourceResponse(
       interpolateTemplate(source.warmupUrl, fullVars),
       ensureTrailingSlash(source.baseUrl),
     ).toString();
-    if (resolvedWarmup !== urlObj.toString()) {
+    if (resolvedWarmup !== url) {
       const warmupHeaders = new Headers();
       for (const [k, v] of Object.entries(source.headers ?? {})) {
         warmupHeaders.set(k, interpolateTemplate(v, fullVars));
@@ -398,21 +463,20 @@ export async function fetchSourceResponse(
         source,
         timeoutMs,
       );
-      ({ response, text } = await executeTimedFetch(urlObj.toString(), init, source, timeoutMs));
+      ({ response, text } = await executeTimedFetch(url, init, source, timeoutMs));
     }
   }
 
   if (!response.ok) {
     throw new SourceHttpError({
       sourceId: source.id,
-      url: urlObj.toString(),
+      url,
       status: response.status,
       statusText: response.statusText,
     });
   }
 
   let json: unknown = undefined;
-  const responseType = reqConfig.responseType ?? 'html';
   if (responseType === 'json' || responseType === 'json-html') {
     try {
       json = JSON.parse(text);
@@ -424,7 +488,7 @@ export async function fetchSourceResponse(
   return {
     text,
     json,
-    finalUrl: response.url || urlObj.toString(),
+    finalUrl: response.url || url,
     status: response.status,
   };
 }

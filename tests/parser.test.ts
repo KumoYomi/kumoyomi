@@ -686,4 +686,112 @@ describe('KumoYomi Universal Parser & Templates', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('réutilise rawJson entre getMangaDetails et getChapters, persiste tabProxy et absorbe un flicker Cloudflare', async () => {
+    const jsonSource = validateRawSourceConfig({
+      id: 'demo-json-api',
+      name: 'Demo JSON',
+      lang: 'fr',
+      baseUrl: 'https://demo-json.example',
+      mangaDetails: {
+        request: {
+          method: 'GET',
+          url: '/api/v1/manga',
+          queryParams: { manga: '{{mangaSlug}}' },
+          responseType: 'json',
+        },
+        fields: {
+          title: { jsonPath: 'info.title' },
+          author: { jsonPath: 'info.author' },
+        },
+      },
+      chapters: {
+        request: {
+          method: 'GET',
+          url: '/api/v1/manga',
+          queryParams: { manga: '{{mangaSlug}}' },
+          responseType: 'json',
+        },
+        itemsPath: 'chapters',
+        fields: {
+          title: { jsonPath: 'title' },
+          url: { jsonTemplate: '/scan/{{id}}', absoluteUrl: true },
+          chapterNumber: { jsonPath: 'num' },
+        },
+      },
+      pages: {
+        request: {
+          method: 'GET',
+          url: '/api/v1/chapter',
+          queryParams: { chapter: '{{chapterSlug}}' },
+          responseType: 'json',
+        },
+        itemsPath: 'pages',
+        imageUrl: { jsonPath: 'url' },
+      },
+    });
+    const resolved = resolveSourceWithTemplates(jsonSource, templateMap);
+    const engine = new UniversalParserEngine();
+
+    const directFetch = vi.fn(
+      async () =>
+        new Response('<title>Just a moment...</title>', {
+          status: 403,
+          headers: { 'cf-mitigated': 'challenge' },
+        }),
+    );
+    vi.stubGlobal('fetch', directFetch);
+
+    let proxyAttempts = 0;
+    const proxyHandler = vi.fn(async () => {
+      proxyAttempts += 1;
+      if (proxyAttempts === 1) {
+        return {
+          foundTab: true,
+          ok: false,
+          status: 403,
+          statusText: 'Forbidden',
+          headers: { 'cf-mitigated': 'challenge' } as Record<string, string>,
+          bodyText: '<title>Just a moment...</title>',
+        };
+      }
+      return {
+        foundTab: true,
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'application/json' } as Record<string, string>,
+        bodyText: JSON.stringify({
+          info: { title: 'Test JSON Manga', author: 'Auteur Test' },
+          chapters: [{ id: 'ch-10', title: 'Chapitre 10', num: 10 }],
+        }),
+      };
+    });
+    registerInProcessTabProxyHandler(proxyHandler);
+
+    const details = await engine.getMangaDetails(
+      resolved,
+      'https://demo-json.example/manga/test-slug',
+    );
+    expect(details.title).toBe('Test JSON Manga');
+    expect(details.rawJson).toBeDefined();
+    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(proxyHandler).toHaveBeenCalledTimes(2);
+    expect(sessionStorage.getItem('kumoyomi:tab_proxied_domains')).toContain('demo-json.example');
+
+    const chapters = await engine.getChapters(
+      resolved,
+      details.url,
+      details.rawHtml,
+      details.rawJson,
+    );
+    expect(chapters).toHaveLength(1);
+    expect(chapters[0]?.url).toBe('https://demo-json.example/scan/ch-10');
+    // Aucune requête réseau supplémentaire pour les chapitres
+    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(proxyHandler).toHaveBeenCalledTimes(2);
+
+    clearTabProxyCache();
+    expect(sessionStorage.getItem('kumoyomi:tab_proxied_domains')).toBeNull();
+  });
 });

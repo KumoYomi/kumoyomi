@@ -5,6 +5,7 @@ import {
   type FetchedResponse,
   fetchSourceResponse,
   interpolateTemplate,
+  isSameSourceRequest,
 } from '@/src/core/parser/httpClient';
 import type {
   CatalogueEndpointConfig,
@@ -452,6 +453,8 @@ export class UniversalParserEngine {
               .map((t) => t.trim())
               .filter(Boolean)
           : undefined,
+        rawHtml: res.text,
+        rawJson: res.json,
       };
     }
 
@@ -490,6 +493,7 @@ export class UniversalParserEngine {
             .filter(Boolean)
         : undefined,
       rawHtml: res.text,
+      rawJson: res.json,
     };
   }
 
@@ -497,13 +501,29 @@ export class UniversalParserEngine {
     source: SourceConfig,
     mangaUrl: string,
     cachedDetailsHtml?: string,
+    cachedDetailsJson?: unknown,
   ): Promise<ParsedChapterItem[]> {
     const cfg = source.chapters;
     let items: ParsedChapterItem[] = [];
 
     if (cfg.request) {
+      const cfgResponseType = cfg.request.responseType ?? 'html';
+      const hasCachedPayload =
+        cfgResponseType === 'html'
+          ? cachedDetailsHtml !== undefined
+          : cachedDetailsJson !== undefined;
+      const canReuseDetailsResponse =
+        hasCachedPayload &&
+        isSameSourceRequest(source, cfg.request, source.mangaDetails.request, { mangaUrl });
       try {
-        const res = await fetchSourceResponse(source, cfg.request, { mangaUrl });
+        const res: FetchedResponse = canReuseDetailsResponse
+          ? {
+              text: cachedDetailsHtml ?? '',
+              json: cachedDetailsJson,
+              finalUrl: mangaUrl,
+              status: 200,
+            }
+          : await fetchSourceResponse(source, cfg.request, { mangaUrl });
         items = this.extractChaptersFromResponse(source, res, mangaUrl);
       } catch (err) {
         if (!cfg.fallbackInline || !cachedDetailsHtml) {

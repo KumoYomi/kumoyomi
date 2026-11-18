@@ -95,6 +95,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
         activeSource.resolvedConfig,
         details.url || activeLink.sourceMangaUrl,
         details.rawHtml,
+        details.rawJson,
       );
       await syncSourceChapters(mangaId, activeSource.id, parsedChapters);
     } catch (err) {

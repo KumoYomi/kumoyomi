@@ -1,10 +1,12 @@
-import { ExternalLink, RefreshCw, ShieldAlert } from 'lucide-react';
+import { ExternalLink, RefreshCw, ShieldAlert, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { openExternalTab } from '@/src/core/extension/browserBridge';
 
 interface CloudflareBannerProps {
   sourceName: string;
   url: string;
   onRetry?: () => void;
+  onDismiss?: () => void;
   compact?: boolean;
 }
 
@@ -12,8 +14,47 @@ export function CloudflareBanner({
   sourceName,
   url,
   onRetry,
+  onDismiss,
   compact = false,
 }: CloudflareBannerProps) {
+  const [waitingUnlock, setWaitingUnlock] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const onRetryRef = useRef(onRetry);
+  onRetryRef.current = onRetry;
+
+  useEffect(() => {
+    setDismissed(false);
+    setWaitingUnlock(false);
+  }, [url, sourceName]);
+
+  useEffect(() => {
+    if (!waitingUnlock || !onRetryRef.current) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let fired = false;
+
+    const scheduleAutoRetry = () => {
+      if (fired || document.visibilityState !== 'visible') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (fired) return;
+        fired = true;
+        setWaitingUnlock(false);
+        onRetryRef.current?.();
+      }, 300);
+    };
+
+    window.addEventListener('focus', scheduleAutoRetry);
+    document.addEventListener('visibilitychange', scheduleAutoRetry);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('focus', scheduleAutoRetry);
+      document.removeEventListener('visibilitychange', scheduleAutoRetry);
+    };
+  }, [waitingUnlock]);
+
+  if (dismissed) return null;
+
   return (
     <div
       className={`rounded-xl border border-amber-500/30 bg-amber-500/10 ${
@@ -30,9 +71,9 @@ export function CloudflareBanner({
               Vérification Cloudflare requise sur {sourceName}
             </p>
             <p className="text-xs leading-relaxed text-amber-200/80">
-              Le site bloque temporairement les requêtes automatiques (HTTP 403). Ouvrez ou
-              rechargez le site (F5) dans un onglet pour valider/renouveler la session Cloudflare,
-              gardez cet onglet ouvert, puis revenez cliquer sur Réessayer.
+              {waitingUnlock
+                ? 'Onglet ouvert : validez/chargez la page dans cet onglet, gardez-le ouvert, puis revenez ici — KumoYomi relancera automatiquement.'
+                : 'Ouvrez ou rechargez le site (F5) dans un onglet pour valider la session Cloudflare et gardez cet onglet ouvert.'}
             </p>
           </div>
         </div>
@@ -40,7 +81,10 @@ export function CloudflareBanner({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void openExternalTab(url)}
+            onClick={() => {
+              if (onRetry) setWaitingUnlock(true);
+              void openExternalTab(url);
+            }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 transition hover:bg-amber-400"
           >
             <ExternalLink className="h-3.5 w-3.5" />
@@ -49,13 +93,29 @@ export function CloudflareBanner({
           {onRetry && (
             <button
               type="button"
-              onClick={onRetry}
+              onClick={() => {
+                setWaitingUnlock(false);
+                onRetry();
+              }}
               className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:bg-zinc-800"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               Réessayer
             </button>
           )}
+          <button
+            type="button"
+            title="Fermer cette alerte"
+            aria-label="Fermer cette alerte"
+            onClick={() => {
+              setWaitingUnlock(false);
+              setDismissed(true);
+              onDismiss?.();
+            }}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-amber-400/20 text-amber-200/70 transition hover:bg-amber-500/20 hover:text-amber-100"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
     </div>

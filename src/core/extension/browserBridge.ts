@@ -146,7 +146,35 @@ export function getSiteRootDomain(hostname: string): string {
   return lastTwo;
 }
 
-const tabProxiedRootDomains = new Set<string>();
+const TAB_PROXY_STORAGE_KEY = 'kumoyomi:tab_proxied_domains';
+
+function loadPersistedTabProxiedDomains(): Set<string> {
+  try {
+    if (typeof sessionStorage === 'undefined') return new Set();
+    const raw = sessionStorage.getItem(TAB_PROXY_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistTabProxiedDomains(domains: Set<string>): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    if (domains.size === 0) {
+      sessionStorage.removeItem(TAB_PROXY_STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(TAB_PROXY_STORAGE_KEY, JSON.stringify([...domains]));
+    }
+  } catch {
+    // Ignore storage errors in restricted contexts or private mode.
+  }
+}
+
+const tabProxiedRootDomains = loadPersistedTabProxiedDomains();
 
 function extractSiteRootFromUrl(rawUrl: string): string | null {
   try {
@@ -158,12 +186,17 @@ function extractSiteRootFromUrl(rawUrl: string): string | null {
 
 export function markSiteTabProxied(rawUrl: string): void {
   const root = extractSiteRootFromUrl(rawUrl);
-  if (root) tabProxiedRootDomains.add(root);
+  if (root && !tabProxiedRootDomains.has(root)) {
+    tabProxiedRootDomains.add(root);
+    persistTabProxiedDomains(tabProxiedRootDomains);
+  }
 }
 
 export function clearSiteTabProxied(rawUrl: string): void {
   const root = extractSiteRootFromUrl(rawUrl);
-  if (root) tabProxiedRootDomains.delete(root);
+  if (root && tabProxiedRootDomains.delete(root)) {
+    persistTabProxiedDomains(tabProxiedRootDomains);
+  }
 }
 
 export function isSiteTabProxied(rawUrl: string): boolean {
@@ -173,6 +206,7 @@ export function isSiteTabProxied(rawUrl: string): boolean {
 
 export function clearAllSiteTabProxyHints(): void {
   tabProxiedRootDomains.clear();
+  persistTabProxiedDomains(tabProxiedRootDomains);
 }
 
 export async function requestTabProxyFetch(
