@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.15.1",
   "description": "KumoYomi — Agrégateur et lecteur de mangas 100% local en extension navigateur Full-Page (Chrome & Firefox)",
   "scripts": {
     "postinstall": "wxt prepare",
