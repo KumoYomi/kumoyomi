@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import {
+  AlertTriangle,
   CheckCircle2,
   Compass,
   FileJson,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Wrench,
   X,
@@ -27,6 +29,7 @@ import {
   clearSiteTabProxied,
   isExtensionContext,
   isSiteTabProxied,
+  requestBatchOriginPermissions,
   requestOriginPermission,
   requestRepositoryOriginPermission,
 } from '@/src/core/extension/browserBridge';
@@ -35,6 +38,13 @@ import { useTranslation } from '@/src/core/i18n';
 import { revokeScopeBlobUrls } from '@/src/core/image-loader/blobImageLoader';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
+import {
+  importSelectedKeiyoushiSources,
+  KEIYOUSHI_DEFAULT_REPO_URL,
+  type KeiyoushiCatalogScanResult,
+  parseKeiyoushiRepoUrl,
+  scanKeiyoushiFrCatalog,
+} from '@/src/core/parser/keiyoushiImporter';
 import {
   addOrRefreshRepositoryByUrl,
   importLocalJsonConfig,
@@ -388,6 +398,18 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sessionNonce, setSessionNonce] = useState(0);
   const [inspectingSourceId, setInspectingSourceId] = useState<string | null>(null);
+  const [keiyoushiScan, setKeiyoushiScan] = useState<KeiyoushiCatalogScanResult | null>(null);
+  const [keiyoushiScanProgress, setKeiyoushiScanProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [keiyoushiSelected, setKeiyoushiSelected] = useState<Set<string>>(() => new Set());
+  const [keiyoushiSearch, setKeiyoushiSearch] = useState('');
+  const [keiyoushiFilter, setKeiyoushiFilter] = useState<'ready' | 'all'>('ready');
+  const [keiyoushiInstalling, setKeiyoushiInstalling] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const globalPermRef = useRef(true);
 
   useEffect(() => {
@@ -427,10 +449,129 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
     };
   }, [sources]);
 
+  const filteredKeiyoushiEntries = useMemo(() => {
+    if (!keiyoushiScan) return [];
+    const q = keiyoushiSearch.trim().toLowerCase();
+    return keiyoushiScan.entries.filter((entry) => {
+      if (keiyoushiFilter === 'ready' && !entry.compatible) return false;
+      if (
+        q &&
+        !entry.name.toLowerCase().includes(q) &&
+        !entry.baseUrl.toLowerCase().includes(q) &&
+        !(entry.theme ?? '').toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [keiyoushiScan, keiyoushiSearch, keiyoushiFilter]);
+
+  async function startKeiyoushiScan(rawUrl: string) {
+    const normalized = rawUrl.trim();
+    if (!normalized) return;
+    const permPromise =
+      isExtensionContext() && !globalPermRef.current
+        ? requestRepositoryOriginPermission(normalized)
+        : null;
+    setRepoUrlInput(normalized);
+    setAddingRepo(true);
+    setFeedback(null);
+    setKeiyoushiScanProgress({ done: 0, total: 0 });
+    try {
+      if (permPromise) await permPromise;
+      const scan = await scanKeiyoushiFrCatalog(normalized, (done, total) => {
+        setKeiyoushiScanProgress({ done, total });
+      });
+      setKeiyoushiScan(scan);
+      setKeiyoushiSearch('');
+      setKeiyoushiFilter('ready');
+      // Pré-sélectionne rien par défaut si beaucoup de sources ou garde les déjà installées décochées pour un choix explicite propre
+      setKeiyoushiSelected(new Set());
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        text: err instanceof Error ? err.message : t('sources.repoAddError'),
+      });
+    } finally {
+      setKeiyoushiScanProgress(null);
+      setAddingRepo(false);
+    }
+  }
+
+  function toggleKeiyoushiSelection(slug: string) {
+    setKeiyoushiSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) {
+        next.delete(slug);
+      } else {
+        next.add(slug);
+      }
+      return next;
+    });
+  }
+
+  function selectAllCompatibleKeiyoushi() {
+    if (!keiyoushiScan) return;
+    const visibleCompat = filteredKeiyoushiEntries
+      .filter((e) => e.compatible)
+      .map((e) => e.slug);
+    setKeiyoushiSelected((prev) => {
+      const next = new Set(prev);
+      for (const s of visibleCompat) next.add(s);
+      return next;
+    });
+  }
+
+  async function handleInstallSelectedKeiyoushi() {
+    if (!keiyoushiScan || keiyoushiSelected.size === 0) return;
+    const slugs = Array.from(keiyoushiSelected);
+    const chosenUrls = keiyoushiScan.entries
+      .filter((e) => keiyoushiSelected.has(e.slug))
+      .map((e) => e.baseUrl);
+    const permPromise =
+      isExtensionContext() && !globalPermRef.current
+        ? requestBatchOriginPermissions(chosenUrls)
+        : null;
+    setKeiyoushiInstalling({ done: 0, total: slugs.length });
+    setFeedback(null);
+    try {
+      if (permPromise) await permPromise;
+      const res = await importSelectedKeiyoushiSources(
+        keiyoushiScan,
+        slugs,
+        (done, total) => setKeiyoushiInstalling({ done, total }),
+      );
+      setKeiyoushiScan(null);
+      setKeiyoushiSelected(new Set());
+      setRepoUrlInput('');
+      setFeedback({
+        kind: 'ok',
+        text:
+          res.skipped.length > 0
+            ? t('sources.keiyoushiImportedWithSkip', {
+                installed: res.installedCount,
+                skipped: res.skipped.length,
+              })
+            : t('sources.keiyoushiImported', { installed: res.installedCount }),
+      });
+    } catch (err) {
+      setFeedback({
+        kind: 'error',
+        text: err instanceof Error ? err.message : t('sources.repoAddError'),
+      });
+    } finally {
+      setKeiyoushiInstalling(null);
+    }
+  }
+
   async function handleAddRepository(e: FormEvent) {
     e.preventDefault();
     const rawUrl = repoUrlInput.trim();
     if (!rawUrl) return;
+    if (parseKeiyoushiRepoUrl(rawUrl)) {
+      await startKeiyoushiScan(rawUrl);
+      return;
+    }
     // Call Firefox permissions.request synchronously inside user gesture before any await
     const permPromise =
       isExtensionContext() && !globalPermRef.current
@@ -462,6 +603,10 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
 
   async function handleRefreshRepo(repoId: string, url: string) {
     if (url.startsWith('local://')) return;
+    if (parseKeiyoushiRepoUrl(url)) {
+      await startKeiyoushiScan(url);
+      return;
+    }
     setRefreshingRepoId(repoId);
     setFeedback(null);
     try {
@@ -546,6 +691,20 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
     let updatedSources = 0;
     try {
       for (const repo of remoteRepos) {
+        if (parseKeiyoushiRepoUrl(repo.url)) {
+          const scan = await scanKeiyoushiFrCatalog(repo.url);
+          const installedIdsForRepo = new Set(
+            sources.filter((s) => s.repoId === repo.id).map((s) => s.id),
+          );
+          const slugsToRefresh = scan.entries
+            .filter((e) => e.compatible && installedIdsForRepo.has(e.id))
+            .map((e) => e.slug);
+          if (slugsToRefresh.length > 0) {
+            const res = await importSelectedKeiyoushiSources(scan, slugsToRefresh);
+            updatedSources += res.installedCount;
+          }
+          continue;
+        }
         const res = await addOrRefreshRepositoryByUrl(repo.url);
         updatedSources += res.sourcesCount;
       }
@@ -663,7 +822,8 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
         </h2>
         <form onSubmit={(e) => void handleAddRepository(e)} className="mt-3 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:gap-3">
           <input
-            type="url"
+            type="text"
+            inputMode="url"
             value={repoUrlInput}
             onChange={(e) => setRepoUrlInput(e.target.value)}
             placeholder={t('sources.repoPlaceholder')}
@@ -682,8 +842,206 @@ export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
             {t('sources.addRepoBtn')}
           </button>
         </form>
-        <p className="ky-soft mt-2 text-xs">{t('sources.localHint')}</p>
+        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+          <p className="ky-soft text-xs">{t('sources.localHint')}</p>
+          <button
+            type="button"
+            disabled={addingRepo}
+            onClick={() => void startKeiyoushiScan(KEIYOUSHI_DEFAULT_REPO_URL)}
+            className="ky-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition hover:border-sky-400/50 hover:text-[var(--ky-text-heading)] disabled:opacity-50"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-sky-400" />
+            {t('sources.keiyoushiChip')}
+          </button>
+        </div>
+        {keiyoushiScanProgress && keiyoushiScanProgress.total > 0 && (
+          <div className="mt-3 flex items-center gap-2.5 text-xs text-sky-300">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>
+              {t('sources.scanningKeiyoushi', {
+                done: keiyoushiScanProgress.done,
+                total: keiyoushiScanProgress.total,
+              })}
+            </span>
+          </div>
+        )}
       </section>
+
+      {keiyoushiScan && (
+        <section className="ky-surface space-y-4 rounded-2xl border border-sky-500/30 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="ky-heading flex items-center gap-2 text-sm font-semibold">
+                <Sparkles className="h-4 w-4 text-sky-400" />
+                {t('sources.keiyoushiPickerTitle')}
+              </h3>
+              <p className="ky-muted mt-0.5 text-xs">
+                {t('sources.keiyoushiPickerSubtitle', {
+                  compatible: keiyoushiScan.compatibleCount,
+                  total: keiyoushiScan.entries.length,
+                  branch: keiyoushiScan.branch,
+                })}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setKeiyoushiScan(null)}
+              className="ky-chip inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs"
+            >
+              <X className="h-3.5 w-3.5" />
+              {t('sources.keiyoushiClose')}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="relative min-w-0 flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 opacity-50" />
+              <input
+                type="text"
+                value={keiyoushiSearch}
+                onChange={(e) => setKeiyoushiSearch(e.target.value)}
+                placeholder={t('sources.keiyoushiSearchPlaceholder')}
+                className="ky-input w-full rounded-xl py-1.5 pl-8 pr-3 text-xs"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setKeiyoushiFilter('ready')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  keiyoushiFilter === 'ready' ? 'ky-chip-active' : 'ky-chip'
+                }`}
+              >
+                {t('sources.keiyoushiFilterReady', { count: keiyoushiScan.compatibleCount })}
+              </button>
+              <button
+                type="button"
+                onClick={() => setKeiyoushiFilter('all')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  keiyoushiFilter === 'all' ? 'ky-chip-active' : 'ky-chip'
+                }`}
+              >
+                {t('sources.keiyoushiFilterAll', { count: keiyoushiScan.entries.length })}
+              </button>
+            </div>
+
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                onClick={selectAllCompatibleKeiyoushi}
+                className="ky-chip rounded-lg px-2.5 py-1.5 text-xs font-medium"
+              >
+                {t('sources.keiyoushiSelectAll')}
+              </button>
+              {keiyoushiSelected.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setKeiyoushiSelected(new Set())}
+                  className="ky-chip rounded-lg px-2.5 py-1.5 text-xs"
+                >
+                  {t('sources.keiyoushiClearSelection')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid max-h-96 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredKeiyoushiEntries.map((entry) => {
+              const checked = keiyoushiSelected.has(entry.slug);
+              const reasonLabel =
+                entry.compatReason === 'supported_theme'
+                  ? t('sources.keiyoushiReason.supported_theme', {
+                      theme: entry.theme ?? 'theme',
+                    })
+                  : t(`sources.keiyoushiReason.${entry.compatReason}`);
+              let hostname = entry.baseUrl;
+              try {
+                hostname = new URL(entry.baseUrl).hostname.replace(/^www\./, '');
+              } catch {
+                // Keep baseUrl fallback
+              }
+
+              return (
+                <label
+                  key={entry.slug}
+                  className={`flex items-start gap-2.5 rounded-xl border p-2.5 text-xs transition ${
+                    entry.compatible
+                      ? checked
+                        ? 'cursor-pointer border-sky-400/60 bg-sky-500/10'
+                        : 'cursor-pointer border-[var(--ky-border)] hover:border-sky-400/40'
+                      : 'cursor-not-allowed border-[var(--ky-border)] opacity-55'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={!entry.compatible || Boolean(keiyoushiInstalling)}
+                    checked={checked}
+                    onChange={() => toggleKeiyoushiSelection(entry.slug)}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded accent-sky-400"
+                  />
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="ky-heading truncate font-semibold">{entry.name}</span>
+                      {entry.nsfw && (
+                        <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-rose-300">
+                          18+
+                        </span>
+                      )}
+                      {entry.alreadyInstalled && (
+                        <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                          {t('sources.keiyoushiInstalledBadge')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="ky-soft truncate text-[11px]">{hostname}</div>
+                    <div className="flex items-center gap-1 text-[10px]">
+                      {entry.compatible ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {reasonLabel}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-amber-300">
+                          <AlertTriangle className="h-3 w-3" />
+                          {reasonLabel}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--ky-border)] pt-3">
+            <div className="ky-muted text-xs">
+              {keiyoushiInstalling && (
+                <span className="inline-flex items-center gap-2 text-sky-300">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {t('sources.keiyoushiInstalling', {
+                    done: keiyoushiInstalling.done,
+                    total: keiyoushiInstalling.total,
+                  })}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={keiyoushiSelected.size === 0 || Boolean(keiyoushiInstalling)}
+              onClick={() => void handleInstallSelectedKeiyoushi()}
+              className="ky-btn-primary inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {keiyoushiInstalling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Plus className="h-3.5 w-3.5" />
+              )}
+              {t('sources.keiyoushiInstallBtn', { count: keiyoushiSelected.size })}
+            </button>
+          </div>
+        </section>
+      )}
 
       {showPasteModal && (
         <section className="ky-surface space-y-3 rounded-2xl border p-5">

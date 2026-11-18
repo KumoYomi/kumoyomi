@@ -1,4 +1,5 @@
 import type {
+  CatalogueEndpointConfig,
   ChaptersEndpointConfig,
   MangaDetailsConfig,
   PagesEndpointConfig,
@@ -79,6 +80,31 @@ export function validateRepositoryManifest(raw: unknown): RepositoryManifest {
   };
 }
 
+function mergeCatalogueConfig(
+  base?: Partial<CatalogueEndpointConfig>,
+  override?: Partial<CatalogueEndpointConfig>,
+): CatalogueEndpointConfig | undefined {
+  if (!base && !override) return undefined;
+  const request = override?.request ?? base?.request;
+  const itemSelector = override?.itemSelector ?? base?.itemSelector;
+  const itemsPath = override?.itemsPath ?? base?.itemsPath;
+  const fields = {
+    ...(base?.fields ?? {}),
+    ...(override?.fields ?? {}),
+  } as CatalogueEndpointConfig['fields'];
+  if (!request || !fields.title || !fields.url) {
+    return undefined;
+  }
+  return {
+    ...(base ?? {}),
+    ...(override ?? {}),
+    request,
+    itemSelector,
+    itemsPath,
+    fields,
+  };
+}
+
 function mergeDetailsConfig(
   base?: Partial<MangaDetailsConfig>,
   override?: Partial<MangaDetailsConfig>,
@@ -116,8 +142,10 @@ function mergeChaptersConfig(
     throw new Error('Missing "chapters.fields.title" or "url" selector.');
   }
   return {
-    request: override?.request ?? base?.request,
+    request: override && 'request' in override ? override.request : base?.request,
     fallbackInline: override?.fallbackInline ?? base?.fallbackInline,
+    extractVarsFromDetails:
+      override?.extractVarsFromDetails ?? base?.extractVarsFromDetails,
     itemsPath: override?.itemsPath ?? base?.itemsPath,
     itemSelector: override?.itemSelector ?? base?.itemSelector,
     fields,
@@ -143,6 +171,8 @@ function mergePagesConfig(
     itemSelector: override?.itemSelector ?? base?.itemSelector,
     imageUrl,
     numberedPages,
+    scriptJson: override?.scriptJson ?? base?.scriptJson,
+    scriptArrayRegex: override?.scriptArrayRegex ?? base?.scriptArrayRegex,
   };
 }
 
@@ -175,9 +205,9 @@ export function resolveSourceWithTemplates(
       ...(validatedRaw.headers ?? {}),
     },
     warmupUrl: validatedRaw.warmupUrl ?? template?.warmupUrl,
-    popular: validatedRaw.popular ?? template?.popular,
-    latest: validatedRaw.latest ?? template?.latest,
-    search: validatedRaw.search ?? template?.search,
+    popular: mergeCatalogueConfig(template?.popular, validatedRaw.popular),
+    latest: mergeCatalogueConfig(template?.latest, validatedRaw.latest),
+    search: mergeCatalogueConfig(template?.search, validatedRaw.search),
     mangaDetails: mergeDetailsConfig(template?.mangaDetails, validatedRaw.mangaDetails),
     chapters: mergeChaptersConfig(template?.chapters, validatedRaw.chapters),
     pages: mergePagesConfig(template?.pages, validatedRaw.pages),

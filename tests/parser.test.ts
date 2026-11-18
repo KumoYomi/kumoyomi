@@ -16,6 +16,16 @@ import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
 import { parserEngine, UniversalParserEngine } from '@/src/core/parser/engine';
 import {
+  parseKeiyoushiGradleBuild,
+  parseKeiyoushiRepoUrl,
+} from '@/src/core/parser/keiyoushiImporter';
+import {
+  BUILT_IN_KEIYOUSHI_TEMPLATES,
+  buildThemeSourceConfig,
+  compileFrenchKotlinSource,
+  FRENCH_CUSTOM_RECIPES,
+} from '@/src/core/parser/keiyoushiThemes';
+import {
   getLastCloudflareUnlockTime,
   notifyCloudflareDomainUnlocked,
   onCloudflareDomainUnlocked,
@@ -1186,5 +1196,331 @@ describe('KumoYomi Universal Parser & Templates', () => {
       'm1',
       expect.objectContaining({ categories: ['Action', 'Favorites'] }),
     );
+  });
+});
+
+describe('Keiyoushi / Mihon FR Importer & Compiler', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('recognizes Keiyoushi GitHub URLs while leaving standard KumoYomi JSON URLs untouched', () => {
+    const repo = parseKeiyoushiRepoUrl('https://github.com/keiyoushi/extensions-source');
+    expect(repo).not.toBeNull();
+    expect(repo?.owner).toBe('keiyoushi');
+    expect(repo?.repo).toBe('extensions-source');
+    expect(repo?.langPath).toBe('src/fr');
+
+    const branchRepo = parseKeiyoushiRepoUrl(
+      'https://github.com/keiyoushi/extensions-source/tree/dev/src/fr',
+    );
+    expect(branchRepo?.branch).toBe('dev');
+    expect(branchRepo?.langPath).toBe('src/fr');
+
+    expect(parseKeiyoushiRepoUrl('https://github.com/user/my-kumoyomi-repo')).toBeNull();
+    expect(
+      parseKeiyoushiRepoUrl('https://github.com/keiyoushi/custom/blob/main/index.json'),
+    ).toBeNull();
+  });
+
+  it('parses modern keiyoushi {} DSL and legacy build.gradle formats including NSFW and multi-source blocks', () => {
+    const modernDsl = `
+      plugins { alias(kei.plugins.extension) }
+      keiyoushi {
+        name = "Demo Manga"
+        theme = "mangathemesia"
+        contentWarning = ContentWarning.NSFW
+        source {
+          lang = "en"
+          baseUrl = "https://en.demo-site.example"
+        }
+        source {
+          lang = "fr"
+          baseUrl = "https://fr.demo-site.example/"
+        }
+      }
+    `;
+    const metaModern = parseKeiyoushiGradleBuild(modernDsl, 'demomanga', 'fr');
+    expect(metaModern).toEqual({
+      slug: 'demomanga',
+      id: 'demo-manga-fr',
+      name: 'Demo Manga',
+      lang: 'fr',
+      baseUrl: 'https://fr.demo-site.example',
+      nsfw: true,
+      theme: 'mangathemesia',
+    });
+
+    const legacyGradle = `
+      extName = 'Origines Demo'
+      themePkg = 'origines'
+      baseUrl = 'https://origines-demo.example'
+      extLang = 'fr'
+    `;
+    const metaLegacy = parseKeiyoushiGradleBuild(legacyGradle, 'originesdemo', 'fr');
+    expect(metaLegacy).toEqual({
+      slug: 'originesdemo',
+      id: 'origines-demo-fr',
+      name: 'Origines Demo',
+      lang: 'fr',
+      baseUrl: 'https://origines-demo.example',
+      theme: 'origines',
+    });
+  });
+
+  it('validates all 7 built-in generic Keiyoushi multisrc templates and resolves theme overrides', () => {
+    const tplMap = new Map<string, SourceTemplateConfig>();
+    for (const [id, rawTpl] of Object.entries(BUILT_IN_KEIYOUSHI_TEMPLATES)) {
+      const validated = validateTemplateConfig(rawTpl);
+      tplMap.set(id, validated);
+    }
+
+    const madaraRaw = buildThemeSourceConfig(
+      {
+        slug: 'demo-madara',
+        id: 'demo-madara-fr',
+        name: 'Demo Madara',
+        lang: 'fr',
+        baseUrl: 'https://madara-demo.example',
+        theme: 'madara',
+      },
+      'madara',
+      `
+        class DemoMadara : MadaraNoAjax() {
+          override val mangaSubString = "webtoon"
+          override fun archiveSelector() = ".mo2-archive-card"
+        }
+      `,
+    );
+    const madaraResolved = resolveSourceWithTemplates(madaraRaw, tplMap);
+    expect(madaraResolved.vars?.mangaSubString).toBe('webtoon');
+    expect(madaraResolved.popular?.itemSelector).toBe('.mo2-archive-card');
+    expect(madaraResolved.chapters.request).toBeUndefined();
+    expect(madaraResolved.chapters.fallbackInline).toBe(true);
+
+    for (const themeId of [
+      'origines',
+      'mangathemesia',
+      'pizzareader',
+      'fuzzydoodle',
+      'mmrcms',
+      'scanreader',
+    ]) {
+      const raw = buildThemeSourceConfig(
+        {
+          slug: `demo-${themeId}`,
+          id: `demo-${themeId}-fr`,
+          name: `Demo ${themeId}`,
+          lang: 'fr',
+          baseUrl: `https://${themeId}-demo.example`,
+          theme: themeId,
+        },
+        themeId,
+        themeId === 'fuzzydoodle' ? 'override val latestFromHomePage = true' : '',
+      );
+      const resolved = resolveSourceWithTemplates(raw, tplMap);
+      expect(resolved.extends).toBe(themeId);
+      if (themeId === 'fuzzydoodle') {
+        expect(resolved.latest?.request.url).toBe('{{baseUrl}}/?page={{page}}');
+      }
+    }
+  });
+
+  it('compiles French custom recipes cleanly and honestly flags Canvas/Turnstile/NextJS sources', () => {
+    const tplMap = new Map<string, SourceTemplateConfig>();
+    const punkRes = compileFrenchKotlinSource(
+      {
+        slug: 'punkrecords',
+        id: 'punk-demo-fr',
+        name: 'Punk Demo',
+        lang: 'fr',
+        baseUrl: 'https://punk-demo.example',
+      },
+      '',
+    );
+    expect(punkRes.compatible).toBe(true);
+    expect(punkRes.reason).toBe('supported_recipe');
+    const resolvedPunk = resolveSourceWithTemplates(punkRes.config!, tplMap);
+    expect(resolvedPunk.pages.request.url).toContain('{{chapterParentSlug}}');
+
+    for (const slug of Object.keys(FRENCH_CUSTOM_RECIPES)) {
+      const customRes = compileFrenchKotlinSource(
+        {
+          slug,
+          id: `${slug}-fr`,
+          name: `Test ${slug}`,
+          lang: 'fr',
+          baseUrl: `https://${slug}.example`,
+        },
+        '',
+      );
+      expect(customRes.compatible).toBe(true);
+      const resolved = resolveSourceWithTemplates(customRes.config!, tplMap);
+      expect(resolved.id).toBe(`${slug}-fr`);
+    }
+
+    const canvasRes = compileFrenchKotlinSource(
+      {
+        slug: 'canvas-demo',
+        id: 'canvas-demo-fr',
+        name: 'Canvas Demo',
+        lang: 'fr',
+        baseUrl: 'https://canvas-demo.example',
+      },
+      'class Demo { fun descramble(bmp: Bitmap) { val c = Canvas(bmp) } }',
+    );
+    expect(canvasRes.compatible).toBe(false);
+    expect(canvasRes.reason).toBe('incompatible_canvas');
+
+    const turnstileRes = compileFrenchKotlinSource(
+      {
+        slug: 'cf-demo',
+        id: 'cf-demo-fr',
+        name: 'Turnstile Demo',
+        lang: 'fr',
+        baseUrl: 'https://cf-demo.example',
+      },
+      'if (doc.selectFirst(".cf-turnstile") != null) throw Exception("turnstile")',
+    );
+    expect(turnstileRes.compatible).toBe(false);
+    expect(turnstileRes.reason).toBe('incompatible_turnstile');
+
+    const nextRes = compileFrenchKotlinSource(
+      {
+        slug: 'next-demo',
+        id: 'next-demo-fr',
+        name: 'NextJS Demo',
+        lang: 'fr',
+        baseUrl: 'https://next-demo.example',
+      },
+      'client.get(url, Fetch.XHR).extractNextJs<ReaderDto>()',
+    );
+    expect(nextRes.compatible).toBe(false);
+    expect(nextRes.reason).toBe('incompatible_nextjs_rsc');
+  });
+
+  it('executes ScanReader extractVarsFromDetails + base64Reverse and MangaThemesia ts_reader JSON parsing', async () => {
+    const tplMap = new Map<string, SourceTemplateConfig>(
+      Object.entries(BUILT_IN_KEIYOUSHI_TEMPLATES),
+    );
+    const scanReader = resolveSourceWithTemplates(
+      {
+        id: 'sr-demo-fr',
+        name: 'ScanReader Demo',
+        lang: 'fr',
+        extends: 'scanreader',
+        baseUrl: 'https://sr-demo.example',
+      },
+      tplMap,
+    );
+
+    const reversed1 = Buffer.from('https://sr-demo.example/p/1.webp'.split('').reverse().join('')).toString('base64');
+    const reversed2 = Buffer.from('https://sr-demo.example/p/2.webp'.split('').reverse().join('')).toString('base64');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === 'https://sr-demo.example/mangas/test-title/') {
+        return new Response(
+          `<html><body>
+            <h1 class="manga-title">Test Title</h1>
+            <div id="secure-chapters-container" data-manga-id="42" data-nonce="abc999"></div>
+          </body></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://sr-demo.example/wp-admin/admin-ajax.php' && init?.method === 'POST') {
+        expect(String(init.body)).toContain('manga_id=42');
+        expect(String(init.body)).toContain('nonce=abc999');
+        return new Response(
+          JSON.stringify({
+            data: `<div><a href="https://sr-demo.example/chapitre/10">Chapitre 10</a></div>`,
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://sr-demo.example/chapitre/10') {
+        return new Response(
+          `<html><script>const imgs = ["${reversed1}", "${reversed2}"];</script></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://mt-demo.example/ch-1') {
+        return new Response(
+          `<html><script>ts_reader.run({"sources":[{"images":["https://mt-demo.example/1.jpg","https://mt-demo.example/2.jpg"]}]});</script></html>`,
+          { status: 200 },
+        );
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const chapters = await parserEngine.getChapters(
+      scanReader,
+      'https://sr-demo.example/mangas/test-title/',
+    );
+    expect(chapters).toHaveLength(1);
+    expect(chapters[0]?.url).toBe('https://sr-demo.example/chapitre/10');
+
+    const pages = await parserEngine.getChapterPages(
+      scanReader,
+      'https://sr-demo.example/chapitre/10',
+    );
+    expect(pages.map((p) => p.imageUrl)).toEqual([
+      'https://sr-demo.example/p/1.webp',
+      'https://sr-demo.example/p/2.webp',
+    ]);
+
+    const mtSource = resolveSourceWithTemplates(
+      {
+        id: 'mt-demo-fr',
+        name: 'MT Demo',
+        lang: 'fr',
+        extends: 'mangathemesia',
+        baseUrl: 'https://mt-demo.example',
+      },
+      tplMap,
+    );
+    const mtPages = await parserEngine.getChapterPages(
+      mtSource,
+      'https://mt-demo.example/ch-1',
+    );
+    expect(mtPages.map((p) => p.imageUrl)).toEqual([
+      'https://mt-demo.example/1.jpg',
+      'https://mt-demo.example/2.jpg',
+    ]);
+  });
+
+  it('converts modern keiyoushi {} extension directory via CLI converter', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'kei-conv-'));
+    try {
+      const extDir = join(tmpDir, 'demopizza');
+      mkdirSync(join(extDir, 'src'), { recursive: true });
+      writeFileSync(
+        join(extDir, 'build.gradle.kts'),
+        `
+        keiyoushi {
+          name = "Pizza Demo"
+          theme = "pizzareader"
+          source {
+            lang = "fr"
+            baseUrl = "https://pizza-demo.example"
+          }
+        }
+        `,
+        'utf8',
+      );
+      writeFileSync(
+        join(extDir, 'src', 'PizzaDemo.kt'),
+        `class PizzaDemo : PizzaReader() { override val apiPath = "/v2" }`,
+        'utf8',
+      );
+      const res = convertKeiyoushiDirectory(extDir);
+      expect(res.ok).toBe(true);
+      expect(res.config?.extends).toBe('pizzareader');
+      expect(res.config?.baseUrl).toBe('https://pizza-demo.example');
+      expect(res.config?.vars?.apiPath).toBe('/v2');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

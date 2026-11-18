@@ -2,6 +2,7 @@ import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
 import {
   CloudflareChallengeError,
+  extractJsonFromHtmlScript,
   type FetchedResponse,
   fetchSourceResponse,
   interpolateTemplate,
@@ -71,7 +72,12 @@ function findMatchingElements(scope: ParentNode, extractor: FieldExtractor): Ele
 
   let nodes: Element[] = [];
   for (const sel of selectors) {
-    const found = Array.from(scope.querySelectorAll(sel));
+    const found =
+      sel === 'self'
+        ? scope instanceof Element
+          ? [scope]
+          : []
+        : Array.from(scope.querySelectorAll(sel));
     if (found.length > 0) {
       nodes = found;
       break;
@@ -109,11 +115,22 @@ function applyPostProcessing(
   baseUrl: string,
   pageUrl?: string,
   vars?: Record<string, string>,
+  mangaUrl?: string,
 ): string {
   let value = extractor.trim === false ? rawValue : rawValue.trim();
 
   if (extractor.decodeHtmlEntities) {
     value = decodeHtmlEntities(value);
+  }
+
+  if (extractor.base64Reverse && value) {
+    try {
+      const cleaned = value.replace(/\s+/g, '');
+      const decoded = atob(cleaned);
+      value = decoded.split('').reverse().join('');
+    } catch {
+      // Ignore malformed base64 and fall back cleanly
+    }
   }
 
   if (extractor.regex) {
@@ -136,11 +153,11 @@ function applyPostProcessing(
   }
 
   if (value && extractor.prefix) {
-    value = `${interpolateTemplate(extractor.prefix, { baseUrl, vars })}${value}`;
+    value = `${interpolateTemplate(extractor.prefix, { baseUrl, mangaUrl, vars })}${value}`;
   }
 
   if (value && extractor.suffix) {
-    value = `${value}${interpolateTemplate(extractor.suffix, { baseUrl, vars })}`;
+    value = `${value}${interpolateTemplate(extractor.suffix, { baseUrl, mangaUrl, vars })}`;
   }
 
   if (extractor.absoluteUrl && value) {
@@ -204,11 +221,22 @@ function renderJsonTemplate(template: string, item: unknown): string {
   });
 }
 
+function stringifyJsonElement(el: unknown): string {
+  if (el === null || el === undefined) return '';
+  if (typeof el === 'object') {
+    const rec = el as Record<string, unknown>;
+    const named = rec.name ?? rec.title ?? rec.tag ?? rec.label;
+    if (named !== undefined && named !== null) return String(named);
+  }
+  return String(el);
+}
+
 export function extractJsonField(
   item: unknown,
   extractor: FieldExtractor | undefined,
   baseUrl: string,
   vars?: Record<string, string>,
+  mangaUrl?: string,
 ): string {
   if (!extractor) return '';
 
@@ -226,8 +254,8 @@ export function extractJsonField(
       const val = getByDotPath(item, path);
       if (val === null || val === undefined) continue;
       const candidate = Array.isArray(val)
-        ? val.map(String).join(extractor.joinAll ?? ', ')
-        : String(val);
+        ? val.map(stringifyJsonElement).filter(Boolean).join(extractor.joinAll ?? ', ')
+        : stringifyJsonElement(val);
       if (candidate.trim() !== '' || paths.length === 1) {
         raw = candidate;
         break;
@@ -235,7 +263,7 @@ export function extractJsonField(
     }
   }
 
-  return applyPostProcessing(raw, extractor, baseUrl, undefined, vars);
+  return applyPostProcessing(raw, extractor, baseUrl, undefined, vars, mangaUrl);
 }
 
 function getHtmlDocumentFromResponse(
@@ -243,7 +271,7 @@ function getHtmlDocumentFromResponse(
   responseType: 'html' | 'json' | 'json-html' | undefined,
   jsonHtmlPath?: string,
 ): Document {
-  if (responseType === 'json-html') {
+  if (responseType === 'json-html' && res.json !== undefined) {
     const htmlFragment = getByDotPath(res.json, jsonHtmlPath);
     return parseHtmlDocument(typeof htmlFragment === 'string' ? htmlFragment : '');
   }
@@ -505,28 +533,51 @@ export class UniversalParserEngine {
   ): Promise<ParsedChapterItem[]> {
     const cfg = source.chapters;
     let items: ParsedChapterItem[] = [];
+    let detailsHtml = cachedDetailsHtml;
 
     if (cfg.request) {
       const cfgResponseType = cfg.request.responseType ?? 'html';
       const hasCachedPayload =
         cfgResponseType === 'html'
-          ? cachedDetailsHtml !== undefined
+          ? detailsHtml !== undefined
           : cachedDetailsJson !== undefined;
       const canReuseDetailsResponse =
         hasCachedPayload &&
+        !cfg.extractVarsFromDetails &&
         isSameSourceRequest(source, cfg.request, source.mangaDetails.request, { mangaUrl });
       try {
+        let effectiveSource = source;
+        if (cfg.extractVarsFromDetails && Object.keys(cfg.extractVarsFromDetails).length > 0) {
+          if (!detailsHtml) {
+            detailsHtml = (
+              await fetchSourceResponse(source, source.mangaDetails.request, { mangaUrl })
+            ).text;
+          }
+          const detailsDoc = parseHtmlDocument(detailsHtml);
+          const extractedVars: Record<string, string> = {};
+          for (const [varKey, extractor] of Object.entries(cfg.extractVarsFromDetails)) {
+            extractedVars[varKey] = extractDomField(detailsDoc, extractor, source.baseUrl, mangaUrl);
+          }
+          effectiveSource = {
+            ...source,
+            vars: {
+              ...(source.vars ?? {}),
+              ...extractedVars,
+            },
+          };
+        }
+
         const res: FetchedResponse = canReuseDetailsResponse
           ? {
-              text: cachedDetailsHtml ?? '',
+              text: detailsHtml ?? '',
               json: cachedDetailsJson,
               finalUrl: mangaUrl,
               status: 200,
             }
-          : await fetchSourceResponse(source, cfg.request, { mangaUrl });
-        items = this.extractChaptersFromResponse(source, res, mangaUrl);
+          : await fetchSourceResponse(effectiveSource, cfg.request, { mangaUrl });
+        items = this.extractChaptersFromResponse(effectiveSource, res, mangaUrl);
       } catch (err) {
-        if (!cfg.fallbackInline || !cachedDetailsHtml) {
+        if (!cfg.fallbackInline || !detailsHtml) {
           throw err;
         }
       }
@@ -534,7 +585,7 @@ export class UniversalParserEngine {
 
     if (items.length === 0 && (cfg.fallbackInline || !cfg.request)) {
       const html =
-        cachedDetailsHtml ??
+        detailsHtml ??
         (await fetchSourceResponse(source, source.mangaDetails.request, { mangaUrl })).text;
       items = this.extractChaptersFromHtml(source, html, mangaUrl);
     }
@@ -555,8 +606,20 @@ export class UniversalParserEngine {
       const list = Array.isArray(rawList) ? rawList : [];
       const chapters: ParsedChapterItem[] = [];
       for (const entry of list) {
-        const title = extractJsonField(entry, cfg.fields.title, source.baseUrl, source.vars);
-        const url = extractJsonField(entry, cfg.fields.url, source.baseUrl, source.vars);
+        const title = extractJsonField(
+          entry,
+          cfg.fields.title,
+          source.baseUrl,
+          source.vars,
+          mangaUrl,
+        );
+        const url = extractJsonField(
+          entry,
+          cfg.fields.url,
+          source.baseUrl,
+          source.vars,
+          mangaUrl,
+        );
         if (!title || !url) continue;
         const rawNum = extractJsonField(
           entry,
@@ -636,6 +699,49 @@ export class UniversalParserEngine {
         }
       }
       return pages;
+    }
+
+    if (cfg.scriptJson) {
+      try {
+        const scriptData = extractJsonFromHtmlScript(res.text, cfg.scriptJson, source.name);
+        const rawList = getByDotPath(scriptData, cfg.scriptJson.itemsPath ?? cfg.itemsPath);
+        const list = Array.isArray(rawList) ? rawList : [];
+        const scriptPages: ParsedPageItem[] = [];
+        for (const entry of list) {
+          if (typeof entry === 'string') {
+            const url = cfg.imageUrl
+              ? applyPostProcessing(entry, cfg.imageUrl, source.baseUrl, res.finalUrl || chapterUrl, source.vars)
+              : entry.trim();
+            if (url) scriptPages.push({ index: scriptPages.length, imageUrl: url });
+          } else {
+            const url = extractJsonField(entry, cfg.imageUrl, source.baseUrl, source.vars);
+            if (url) scriptPages.push({ index: scriptPages.length, imageUrl: url });
+          }
+        }
+        if (scriptPages.length > 0) {
+          return scriptPages;
+        }
+      } catch {
+        // Fallback to scriptArrayRegex or HTML DOM selectors below
+      }
+    }
+
+    if (cfg.scriptArrayRegex) {
+      const re = new RegExp(cfg.scriptArrayRegex, 'g');
+      const arrayPages: ParsedPageItem[] = [];
+      for (const match of res.text.matchAll(re)) {
+        const rawToken = match[1] ?? match[0] ?? '';
+        if (!rawToken) continue;
+        const url = cfg.imageUrl
+          ? applyPostProcessing(rawToken, cfg.imageUrl, source.baseUrl, res.finalUrl || chapterUrl, source.vars)
+          : rawToken.trim();
+        if (url && !url.startsWith('data:image/gif')) {
+          arrayPages.push({ index: arrayPages.length, imageUrl: url });
+        }
+      }
+      if (arrayPages.length > 0) {
+        return arrayPages;
+      }
     }
 
     const doc = getHtmlDocumentFromResponse(res, responseType, cfg.request.jsonHtmlPath);

@@ -1,5 +1,6 @@
 import { db, hashStableId } from '@/src/core/db/db';
 import { sendBackgroundMessage } from '@/src/core/extension/browserBridge';
+import { BUILT_IN_KEIYOUSHI_TEMPLATES } from '@/src/core/parser/keiyoushiThemes';
 import {
   resolveSourceWithTemplates,
   validateRawSourceConfig,
@@ -8,6 +9,17 @@ import {
 } from '@/src/core/parser/validator';
 import type { InstalledSourceRecord, RepositoryRecord, TemplateRecord } from '@/src/core/types/manga';
 import type { RawSourceConfig, SourceTemplateConfig } from '@/src/core/types/source';
+
+async function buildBaseTemplateMap(): Promise<Map<string, SourceTemplateConfig>> {
+  const map = new Map<string, SourceTemplateConfig>(
+    Object.entries(BUILT_IN_KEIYOUSHI_TEMPLATES),
+  );
+  const existingTemplates = await db.templates.toArray();
+  for (const t of existingTemplates) {
+    map.set(t.id, t.config);
+  }
+  return map;
+}
 
 /**
  * Transforme une URL GitHub web (ex: https://github.com/user/repo) en URL raw index.json.
@@ -68,11 +80,7 @@ export async function addOrRefreshRepositoryByUrl(rawInputUrl: string): Promise<
   const repoId = `repo_${hashStableId(manifestUrl)}`;
   const now = Date.now();
 
-  const existingTemplates = await db.templates.toArray();
-  const templateMap = new Map<string, SourceTemplateConfig>();
-  for (const t of existingTemplates) {
-    templateMap.set(t.id, t.config);
-  }
+  const templateMap = await buildBaseTemplateMap();
 
   const repoTemplates: TemplateRecord[] = [];
   for (const entry of manifest.templates ?? []) {
@@ -168,11 +176,7 @@ export async function importLocalJsonConfig(
   const now = Date.now();
   const localRepoId = 'repo_local_imports';
 
-  const existingTemplates = await db.templates.toArray();
-  const templateMap = new Map<string, SourceTemplateConfig>();
-  for (const t of existingTemplates) {
-    templateMap.set(t.id, t.config);
-  }
+  const templateMap = await buildBaseTemplateMap();
 
   // Cas 1 : Manifeste complet (contient un tableau "sources")
   if (Array.isArray(obj.sources)) {

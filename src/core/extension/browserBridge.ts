@@ -148,12 +148,38 @@ export function requestRepositoryOriginPermission(rawUrl: string): Promise<boole
     const trimmed = rawUrl.trim();
     if (!trimmed) return Promise.resolve(false);
     const origins = trimmed.includes('github.com')
-      ? ['https://raw.githubusercontent.com/*', 'https://github.com/*']
+      ? [
+          'https://raw.githubusercontent.com/*',
+          'https://api.github.com/*',
+          'https://github.com/*',
+        ]
       : [`${new URL(trimmed).origin}/*`];
     return api.permissions.request({ origins }).catch(() => false);
   } catch {
     return Promise.resolve(false);
   }
+}
+
+export function requestBatchOriginPermissions(rawUrls: string[]): Promise<boolean> {
+  const api = getApi();
+  if (!api?.permissions) return Promise.resolve(true);
+  const origins = new Set<string>([
+    'https://api.github.com/*',
+    'https://raw.githubusercontent.com/*',
+  ]);
+  for (const rawUrl of rawUrls) {
+    try {
+      const parsed = new URL(rawUrl);
+      origins.add(`${parsed.origin}/*`);
+      const root = getSiteRootDomain(parsed.hostname);
+      if (root.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname)) {
+        origins.add(`https://*.${root}/*`);
+      }
+    } catch {
+      // Ignore malformed origin
+    }
+  }
+  return api.permissions.request({ origins: Array.from(origins) }).catch(() => false);
 }
 
 export interface CloudflarePopupResult {

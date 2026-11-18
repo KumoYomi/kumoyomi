@@ -2,7 +2,15 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
-const SUPPORTED_THEMES = new Set(['origines', 'madara', 'mangathemesia']);
+const SUPPORTED_THEMES = new Set([
+  'origines',
+  'madara',
+  'mangathemesia',
+  'pizzareader',
+  'fuzzydoodle',
+  'mmrcms',
+  'scanreader',
+]);
 
 function parseArgs(argv) {
   const args = { input: '', out: '', pretty: true };
@@ -64,11 +72,18 @@ export function convertKeiyoushiDirectory(extDir) {
   const combined = `${gradleContent}\n${ktContent}`;
 
   const rawTheme =
-    extractMatch(gradleContent, /theme\s*=\s*"([^"]+)"/) ??
-    extractMatch(gradleContent, /themeClass\s*=\s*"([^"]+)"/) ??
-    extractMatch(ktContent, /:\s*(Origines|Madara|MadaraNoAjax|MangaThemesia)\s*\(/i);
+    extractMatch(gradleContent, /\btheme\s*=\s*["']([^"']+)["']/) ??
+    extractMatch(gradleContent, /\bthemePkg\s*=\s*["']([^"']+)["']/) ??
+    extractMatch(gradleContent, /\bthemeClass\s*=\s*["']([^"']+)["']/) ??
+    extractMatch(
+      ktContent,
+      /:\s*(Origines|Madara|MadaraNoAjax|MangaThemesia|PizzaReader|FuzzyDoodle|MMRCMS|ScanReaderTheme)\s*\(/i,
+    );
 
-  const normalizedTheme = rawTheme?.toLowerCase().replace('madaranoajax', 'madara');
+  const normalizedTheme = rawTheme
+    ?.toLowerCase()
+    .replace('madaranoajax', 'madara')
+    .replace('scanreadertheme', 'scanreader');
   if (!normalizedTheme || !SUPPORTED_THEMES.has(normalizedTheme)) {
     return {
       ok: false,
@@ -77,15 +92,29 @@ export function convertKeiyoushiDirectory(extDir) {
     };
   }
 
+  const sourceBlockRe = /\bsource\s*\{([\s\S]*?)\}/g;
+  const sourceBlocks = [];
+  for (const m of gradleContent.matchAll(sourceBlockRe)) {
+    sourceBlocks.push({
+      name: extractMatch(m[1], /\bname\s*=\s*["']([^"']+)["']/),
+      lang: extractMatch(m[1], /\blang\s*=\s*["']([^"']+)["']/),
+      baseUrl: extractMatch(m[1], /\bbaseUrl\s*=\s*["']([^"']+)["']/),
+    });
+  }
+  const preferredBlock = sourceBlocks.find((b) => b.lang === 'fr') ?? sourceBlocks[0];
+  const strippedGradle = gradleContent.replace(sourceBlockRe, '');
+
   const name =
-    extractMatch(gradleContent, /name\s*=\s*"([^"]+)"/) ??
-    extractMatch(gradleContent, /extName\s*=\s*'([^']+)'/) ??
+    preferredBlock?.name ??
+    extractMatch(strippedGradle, /\bname\s*=\s*["']([^"']+)["']/) ??
+    extractMatch(gradleContent, /\bextName\s*=\s*["']([^"']+)["']/) ??
     extractMatch(ktContent, /override\s+val\s+name\s*=\s*"([^"]+)"/) ??
     basename(extDir);
 
   const baseUrl =
-    extractMatch(gradleContent, /baseUrl\s*=\s*"([^"]+)"/) ??
-    extractMatch(gradleContent, /baseUrl\s*=\s*'([^']+)'/) ??
+    preferredBlock?.baseUrl ??
+    extractMatch(strippedGradle, /\bbaseUrl\s*=\s*["']([^"']+)["']/) ??
+    extractMatch(gradleContent, /\bbaseUrl\s*=\s*["']([^"']+)["']/) ??
     extractMatch(ktContent, /override\s+val\s+baseUrl\s*=\s*"([^"]+)"/);
 
   if (!baseUrl) {
@@ -93,8 +122,9 @@ export function convertKeiyoushiDirectory(extDir) {
   }
 
   const lang =
-    extractMatch(gradleContent, /lang\s*=\s*"([^"]+)"/) ??
-    extractMatch(gradleContent, /extLang\s*=\s*'([^']+)'/) ??
+    preferredBlock?.lang ??
+    extractMatch(strippedGradle, /\blang\s*=\s*["']([^"']+)["']/) ??
+    extractMatch(gradleContent, /\bextLang\s*=\s*["']([^"']+)["']/) ??
     extractMatch(ktContent, /override\s+val\s+lang\s*=\s*"([^"]+)"/) ??
     'fr';
 
@@ -103,19 +133,25 @@ export function convertKeiyoushiDirectory(extDir) {
 
   const vars = {};
   const mangaPath = extractMatch(ktContent, /override\s+val\s+mangaPath\s*=\s*"([^"]+)"/);
-  if (mangaPath) vars.mangaPath = mangaPath;
+  if (mangaPath) vars.mangaPath = mangaPath.replace(/^\/+|\/+$/g, '');
 
   const mangaSubString = extractMatch(
     ktContent,
     /override\s+val\s+mangaSubString\s*=\s*"([^"]+)"/,
   );
-  if (mangaSubString) vars.mangaSubString = mangaSubString;
+  if (mangaSubString) vars.mangaSubString = mangaSubString.replace(/^\/+|\/+$/g, '');
 
   const mangaUrlDir = extractMatch(
     ktContent,
     /override\s+val\s+mangaUrlDirectory\s*=\s*"([^"]+)"/,
   );
   if (mangaUrlDir) vars.mangaUrlDirectory = mangaUrlDir.replace(/^\/+|\/+$/g, '');
+
+  const itemPath = extractMatch(ktContent, /override\s+val\s+itemPath\s*=\s*"([^"]+)"/);
+  if (itemPath) vars.itemPath = itemPath.replace(/^\/+|\/+$/g, '');
+
+  const apiPath = extractMatch(ktContent, /override\s+val\s+apiPath\s*=\s*"([^"]+)"/);
+  if (apiPath) vars.apiPath = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
 
   const config = {
     id: slugifyId(name, lang),

@@ -31,6 +31,8 @@ export interface FieldExtractor {
   suffix?: string;
   /** Décode les entités HTML (&amp;, &#039;, etc.). */
   decodeHtmlEntities?: boolean;
+  /** Décode du Base64 puis inverse la chaîne (utilisé par certains thèmes comme ScanReader). */
+  base64Reverse?: boolean;
 }
 
 export type ResponseType = 'html' | 'json' | 'json-html';
@@ -103,6 +105,8 @@ export interface ChaptersEndpointConfig {
   request?: RequestConfig;
   /** Si true, bascule sur les sélecteurs appliqués au HTML de la fiche manga si la requête échoue ou est vide. */
   fallbackInline?: boolean;
+  /** Variables extraites depuis le HTML de la fiche manga avant d'envoyer chapters.request (ex: nonce, mangaId). */
+  extractVarsFromDetails?: Record<string, FieldExtractor>;
   itemsPath?: string;
   itemSelector?: string;
   fields: {
@@ -134,6 +138,10 @@ export interface PagesEndpointConfig {
   itemSelector?: string;
   imageUrl?: FieldExtractor;
   numberedPages?: NumberedPagesConfig;
+  /** Extraction optionnelle depuis un script HTML avant repli sur itemSelector. */
+  scriptJson?: ScriptJsonExtractionConfig & { itemsPath?: string };
+  /** Expression régulière (groupe 1) répétée sur le texte de la page (tableaux JS inline). */
+  scriptArrayRegex?: string;
 }
 
 export interface SourceConfig {
@@ -163,18 +171,27 @@ export interface SourceTemplateConfig {
   vars?: Record<string, string>;
   headers?: Record<string, string>;
   warmupUrl?: string;
-  popular?: CatalogueEndpointConfig;
-  latest?: CatalogueEndpointConfig;
-  search?: CatalogueEndpointConfig;
+  popular?: Partial<CatalogueEndpointConfig>;
+  latest?: Partial<CatalogueEndpointConfig>;
+  search?: Partial<CatalogueEndpointConfig>;
   mangaDetails?: Partial<MangaDetailsConfig>;
   chapters?: Partial<ChaptersEndpointConfig>;
   pages?: Partial<PagesEndpointConfig>;
 }
 
-export type RawSourceConfig = Partial<SourceConfig> & {
+export type RawSourceConfig = Omit<
+  Partial<SourceConfig>,
+  'popular' | 'latest' | 'search' | 'mangaDetails' | 'chapters' | 'pages'
+> & {
   id: string;
   name: string;
   baseUrl: string;
+  popular?: Partial<CatalogueEndpointConfig>;
+  latest?: Partial<CatalogueEndpointConfig>;
+  search?: Partial<CatalogueEndpointConfig>;
+  mangaDetails?: Partial<MangaDetailsConfig>;
+  chapters?: Partial<ChaptersEndpointConfig>;
+  pages?: Partial<PagesEndpointConfig>;
 };
 
 export interface RepositoryManifest {

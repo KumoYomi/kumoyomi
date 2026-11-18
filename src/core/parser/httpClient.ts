@@ -95,6 +95,39 @@ function extractLastSlug(urlOrPath: string): string {
   }
 }
 
+function extractParentSlug(urlOrPath: string): string {
+  if (!urlOrPath) return '';
+  try {
+    const parsed = new URL(urlOrPath, 'https://placeholder.invalid');
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    return parts.length >= 2 ? (parts.at(-2) ?? '') : (parts[0] ?? '');
+  } catch {
+    const clean = urlOrPath.split(/[?#]/)[0] ?? '';
+    const parts = clean.split('/').filter(Boolean);
+    return parts.length >= 2 ? (parts.at(-2) ?? '') : (parts[0] ?? '');
+  }
+}
+
+function extractQueryId(urlOrPath: string): string {
+  if (!urlOrPath) return '';
+  try {
+    const parsed = new URL(urlOrPath, 'https://placeholder.invalid');
+    return parsed.searchParams.get('id') ?? extractLastSlug(urlOrPath);
+  } catch {
+    const match = /[?&]id=([^&#]+)/.exec(urlOrPath);
+    return match?.[1] ?? extractLastSlug(urlOrPath);
+  }
+}
+
+function extractPath(urlOrPath: string): string {
+  if (!urlOrPath) return '';
+  try {
+    return new URL(urlOrPath, 'https://placeholder.invalid').pathname;
+  } catch {
+    return (urlOrPath.split(/[?#]/)[0] ?? '').replace(/^https?:\/\/[^/]+/, '');
+  }
+}
+
 export function interpolateTemplate(template: string, variables: TemplateVariables): string {
   const cleanBase = variables.baseUrl.replace(/\/+$/, '');
   const page = variables.page ?? 1;
@@ -110,10 +143,16 @@ export function interpolateTemplate(template: string, variables: TemplateVariabl
     encodedQuery: encodeURIComponent(query),
     mangaUrl,
     mangaUrlSlash: mangaUrl ? ensureTrailingSlash(mangaUrl) : '',
+    mangaPath: extractPath(mangaUrl),
     mangaSlug: extractLastSlug(mangaUrl),
+    mangaParentSlug: extractParentSlug(mangaUrl),
+    mangaQueryId: extractQueryId(mangaUrl),
     chapterUrl,
     chapterUrlSlash: chapterUrl ? ensureTrailingSlash(chapterUrl) : '',
+    chapterPath: extractPath(chapterUrl),
     chapterSlug: extractLastSlug(chapterUrl),
+    chapterParentSlug: extractParentSlug(chapterUrl),
+    chapterQueryId: extractQueryId(chapterUrl),
   };
 
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, rawKey: string) => {
@@ -535,7 +574,10 @@ export async function fetchSourceResponse(
       try {
         json = JSON.parse(text);
       } catch {
-        throw new Error(`Invalid JSON response received from ${source.name}.`);
+        // Certains points de terminaison WP/HTML (ex: ScanReader admin-ajax) renvoient parfois du HTML brut au lieu de JSON
+        if (responseType === 'json') {
+          throw new Error(`Invalid JSON response received from ${source.name}.`);
+        }
       }
     }
   }
