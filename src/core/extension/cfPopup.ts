@@ -13,9 +13,55 @@ import { isCloudflareResponse } from '@/src/core/parser/httpClient';
 const COOLDOWN_MS = 60_000;
 const POPUP_WIDTH = 520;
 const POPUP_HEIGHT = 660;
+const MANAGED_PROXY_TABS_KEY = 'kumoyomi_cf_proxy_tabs';
 
 const inFlightPopups = new Map<string, Promise<CloudflarePopupResult>>();
 const cancelledUntilByDomain = new Map<string, number>();
+
+type TabsApiWithHide = typeof browser.tabs & {
+  hide?: (tabIds: number | number[]) => Promise<number[]>;
+};
+
+async function loadManagedProxyTabs(): Promise<Record<string, number>> {
+  try {
+    const area = browser.storage?.session ?? browser.storage?.local;
+    if (!area) return {};
+    const res = await area.get(MANAGED_PROXY_TABS_KEY);
+    const raw = res?.[MANAGED_PROXY_TABS_KEY];
+    return raw && typeof raw === 'object' ? (raw as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveManagedProxyTabs(map: Record<string, number>): Promise<void> {
+  try {
+    const area = browser.storage?.session ?? browser.storage?.local;
+    if (!area) return;
+    await area.set({ [MANAGED_PROXY_TABS_KEY]: map });
+  } catch {
+    // Ignore storage write errors
+  }
+}
+
+async function registerManagedProxyTab(root: string, tabId: number): Promise<void> {
+  const map = await loadManagedProxyTabs();
+  const prevId = map[root];
+  if (prevId !== undefined && prevId !== tabId) {
+    await browser.tabs.remove(prevId).catch(() => {});
+  }
+  map[root] = tabId;
+  await saveManagedProxyTabs(map);
+}
+
+export async function closeManagedProxyTabs(): Promise<void> {
+  const map = await loadManagedProxyTabs();
+  const ids = Object.values(map).filter((id) => typeof id === 'number');
+  if (ids.length > 0) {
+    await browser.tabs.remove(ids).catch(() => {});
+  }
+  await saveManagedProxyTabs({});
+}
 
 function rootDomainOf(rawUrl: string): string {
   try {
@@ -325,8 +371,6 @@ async function runPopupVerificationFlow(
         await new Promise((r) => setTimeout(r, 350));
         if (settled) return;
 
-        // Always keep 1 silent pinned tab on the verified domain so partitioned cookies,
-        // POST endpoints, and CDN subdomains stay unlocked without losing clearance.
         markSiteTabProxied(probeTarget);
         markSiteTabProxied(siteUrl);
         cancelledUntilByDomain.delete(root);
@@ -340,48 +384,57 @@ async function runPopupVerificationFlow(
                 (w) => w.id !== popupWinId,
               )?.id;
 
-        if (targetDockWindowId !== undefined) {
+        const tabsWithHide = browser.tabs as TabsApiWithHide;
+        if (targetDockWindowId !== undefined && typeof tabsWithHide.hide === 'function') {
           try {
-            const allTabs = await browser.tabs.query({}).catch(() => []);
-            const stalePinnedIds = allTabs
-              .filter(
-                (t) =>
-                  t.id !== undefined &&
-                  t.id !== popupTabId &&
-                  t.pinned &&
-                  t.url &&
-                  rootDomainOf(t.url) === root,
-              )
-              .map((t) => t.id!);
-
             await browser.tabs.move(popupTabId, { windowId: targetDockWindowId, index: -1 });
-            await browser.tabs.update(popupTabId, { pinned: true, active: false });
-            if (stalePinnedIds.length > 0) {
-              await browser.tabs.remove(stalePinnedIds).catch(() => {});
+            await browser.tabs.update(popupTabId, { pinned: false, active: false });
+            if (callerTabId !== undefined) {
+              await browser.tabs.update(callerTabId, { active: true }).catch(() => {});
             }
+            const hiddenIds = await tabsWithHide.hide(popupTabId);
+            if (Array.isArray(hiddenIds) && hiddenIds.includes(popupTabId)) {
+              await registerManagedProxyTab(root, popupTabId);
 
-            const remaining = await browser.tabs.query({ windowId: popupWinId }).catch(() => []);
-            if (remaining.length === 0) {
-              await browser.windows.remove(popupWinId).catch(() => {});
+              const remaining = await browser.tabs.query({ windowId: popupWinId }).catch(() => []);
+              if (remaining.length === 0) {
+                await browser.windows.remove(popupWinId).catch(() => {});
+              }
+
+              const settleDeadline = Date.now() + 300;
+              while (Date.now() < settleDeadline) {
+                const info = await browser.tabs.get(popupTabId).catch(() => null);
+                if (!info || info.status === 'complete') break;
+                await new Promise((r) => setTimeout(r, 75));
+              }
+
+              await focusCallerContext(callerWindowId ?? targetDockWindowId, callerTabId);
+              notifyCloudflareDomainUnlocked(siteUrl);
+              finish({ unlocked: true, mode: 'hidden_tab' });
+              return;
             }
-
-            // Wait up to 300ms for the docked tab to report status === 'complete'
-            const settleDeadline = Date.now() + 300;
-            while (Date.now() < settleDeadline) {
-              const info = await browser.tabs.get(popupTabId).catch(() => null);
-              if (!info || info.status === 'complete') break;
-              await new Promise((r) => setTimeout(r, 75));
-            }
-
-            await focusCallerContext(callerWindowId ?? targetDockWindowId, callerTabId);
-            notifyCloudflareDomainUnlocked(siteUrl);
-            finish({ unlocked: true, mode: 'pinned_tab' });
-            return;
+            // If Firefox refused to hide for any reason, move back or minimize instead of pinning
           } catch {
-            // Fallback below if cross-window docking fails
+            // Fall through cleanly below
           }
         }
 
+        // Browsers without tabs.hide (e.g. Chromium): close popup completely if direct fetch works,
+        // otherwise minimize the popup window cleanly without creating an unwanted pinned tab.
+        const probeDirect = await canExtensionFetchDirectly(probeTarget);
+        if (probeDirect) {
+          const siteDirect =
+            probeTarget === siteUrl ? true : await canExtensionFetchDirectly(siteUrl);
+          if (siteDirect) {
+            await browser.windows.remove(popupWinId).catch(() => {});
+            await focusCallerContext(callerWindowId, callerTabId);
+            notifyCloudflareDomainUnlocked(siteUrl);
+            finish({ unlocked: true, mode: 'direct' });
+            return;
+          }
+        }
+
+        await registerManagedProxyTab(root, popupTabId);
         await browser.windows.update(popupWinId, { state: 'minimized' }).catch(() => {});
         await focusCallerContext(callerWindowId, callerTabId);
         notifyCloudflareDomainUnlocked(siteUrl);

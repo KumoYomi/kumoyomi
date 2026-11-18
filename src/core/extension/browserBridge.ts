@@ -27,7 +27,8 @@ export type BackgroundMessage =
   | { type: 'PROXY_FETCH_IN_TAB'; payload: TabProxyFetchRequest }
   | { type: 'CHECK_UPDATES_NOW' }
   | { type: 'SET_BADGE_COUNT'; count: number }
-  | { type: 'SET_UPDATE_ALARM'; intervalMinutes: number };
+  | { type: 'SET_UPDATE_ALARM'; intervalMinutes: number }
+  | { type: 'CLEAR_CF_PROXY_TABS' };
 
 export interface UpdateCheckSummary {
   checkedMangas: number;
@@ -157,7 +158,7 @@ export function requestRepositoryOriginPermission(rawUrl: string): Promise<boole
 export interface CloudflarePopupResult {
   unlocked: boolean;
   cancelled?: boolean;
-  mode?: 'direct' | 'pinned_tab' | 'minimized' | 'external_tab';
+  mode?: 'direct' | 'hidden_tab' | 'pinned_tab' | 'minimized' | 'external_tab';
 }
 
 export async function requestCloudflareVerificationPopup(

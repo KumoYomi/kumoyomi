@@ -35,10 +35,10 @@ function readExtensionVersion(): string {
     return (
       g.browser?.runtime?.getManifest?.().version ??
       g.chrome?.runtime?.getManifest?.().version ??
-      '0.4.0'
+      '0.4.1'
     );
   } catch {
-    return '0.4.0';
+    return '0.4.1';
   }
 }
 

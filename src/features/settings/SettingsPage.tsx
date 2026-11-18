@@ -117,6 +117,7 @@ export function SettingsPage() {
 
   function handleResetCloudflareCache() {
     clearTabProxyCache();
+    void sendBackgroundMessage({ type: 'CLEAR_CF_PROXY_TABS' });
     setStatusMessage({
       kind: 'ok',
       text: t('settings.cfResetDone'),

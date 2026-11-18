@@ -4,6 +4,7 @@ import {
   type BackgroundMessage,
   registerInProcessTabProxyHandler,
 } from '@/src/core/extension/browserBridge';
+import { closeManagedProxyTabs } from '@/src/core/extension/cfPopup';
 import {
   ensureImageRefererDnrRule,
   syncSourceDnrRules,
@@ -83,6 +84,7 @@ export default defineBackground(() => {
 
   browser.runtime.onStartup.addListener(() => {
     void (async () => {
+      await closeManagedProxyTabs();
       await syncStoredSourcesDnr();
       await configureUpdateAlarm();
     })();
@@ -157,6 +159,11 @@ export default defineBackground(() => {
         }
         case 'SET_UPDATE_ALARM': {
           await configureUpdateAlarm(message.intervalMinutes);
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'CLEAR_CF_PROXY_TABS': {
+          await closeManagedProxyTabs();
           sendResponse({ ok: true });
           break;
         }
