@@ -6,6 +6,8 @@ export type ReaderMode = 'webtoon' | 'single' | 'double';
 export type ReadingDirection = 'ltr' | 'rtl';
 export type PageFitMode = 'contain' | 'width' | 'original';
 export type AppLocale = 'en' | 'fr' | 'es' | 'zh';
+export type ThemeMode = 'midnight' | 'obsidian' | 'twilight' | 'paper';
+export type AccentPreset = 'aurora' | 'sakura' | 'ocean' | 'emerald' | 'amber' | 'violet';
 
 export interface OfflineChapterMeta {
   chapterId: string;
@@ -122,6 +124,8 @@ export interface ReadingHistoryEntry {
 export interface AppSettings {
   id: 'default';
   language?: AppLocale;
+  themeMode?: ThemeMode;
+  accentColor?: AccentPreset;
   readerMode: ReaderMode;
   readingDirection: ReadingDirection;
   pageFitMode?: PageFitMode;

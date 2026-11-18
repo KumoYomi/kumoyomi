@@ -91,12 +91,12 @@ export function AntiHotlinkImage({
   if (loading) {
     return (
       <div
-        className={`relative flex flex-col items-center justify-center gap-3 overflow-hidden border border-zinc-800/70 bg-zinc-900/75 text-zinc-300 ${boxClass}`}
+        className={`relative flex flex-col items-center justify-center gap-3 overflow-hidden border border-[var(--ky-border)] bg-[var(--ky-surface-2)] text-[var(--ky-text-secondary)] ${boxClass}`}
       >
-        <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-zinc-800/40 via-zinc-900/20 to-rose-950/15" />
-        <Loader2 className="relative h-7 w-7 animate-spin text-rose-500" />
+        <div className="pointer-events-none absolute inset-0 animate-pulse bg-gradient-to-br from-slate-800/35 via-transparent to-[var(--ky-accent-soft)]" />
+        <Loader2 className="relative h-7 w-7 animate-spin text-[var(--ky-accent)]" />
         {loadingLabel && (
-          <span className="relative px-3 text-center text-xs font-medium text-zinc-300">
+          <span className="relative px-3 text-center text-xs font-medium text-[var(--ky-text-secondary)]">
             {loadingLabel}
           </span>
         )}
@@ -109,9 +109,9 @@ export function AntiHotlinkImage({
   if (error || !resolvedSrc) {
     return (
       <div
-        className={`flex flex-col items-center justify-center gap-2 border border-zinc-800/70 bg-zinc-900/90 p-4 text-center text-xs text-zinc-400 ${boxClass}`}
+        className={`flex flex-col items-center justify-center gap-2 border border-[var(--ky-border)] bg-[var(--ky-surface-2)] p-4 text-center text-xs text-[var(--ky-text-muted)] ${boxClass}`}
       >
-        <ImageOff className="h-6 w-6 text-zinc-500" />
+        <ImageOff className="h-6 w-6 text-[var(--ky-text-soft)]" />
         <span>{t('image.unavailable')}</span>
         {showRetry && (
           <button
@@ -120,7 +120,7 @@ export function AntiHotlinkImage({
               e.stopPropagation();
               setAttempt((n) => n + 1);
             }}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700"
+            className="ky-btn-secondary inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             {t('common.retry')}
@@ -135,6 +135,7 @@ export function AntiHotlinkImage({
       src={resolvedSrc}
       alt={alt}
       loading="lazy"
+      decoding="async"
       onLoad={onImageLoad}
       onError={() => setError(true)}
       className={className}

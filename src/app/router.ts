@@ -6,7 +6,7 @@ export type AppRoute =
   | { name: 'explore'; sourceId?: string; query?: string }
   | { name: 'manga'; mangaId: string }
   | { name: 'reader'; mangaId: string; chapterId: string }
-  | { name: 'sources' }
+  | { name: 'sources'; repoUrl?: string }
   | { name: 'settings' };
 
 export function parseHashRoute(hash: string): AppRoute {
@@ -36,7 +36,11 @@ export function parseHashRoute(hash: string): AppRoute {
       }
       return { name: 'library' };
     case 'sources':
-      return { name: 'sources' };
+      return {
+        name: 'sources',
+        repoUrl:
+          searchParams.get('add-repo') ?? searchParams.get('repo') ?? undefined,
+      };
     case 'settings':
       return { name: 'settings' };
     case 'library':
@@ -62,8 +66,14 @@ export function buildHashUrl(route: AppRoute): string {
       return `#/manga/${encodeURIComponent(route.mangaId)}`;
     case 'reader':
       return `#/reader/${encodeURIComponent(route.mangaId)}/${encodeURIComponent(route.chapterId)}`;
-    case 'sources':
+    case 'sources': {
+      if (route.repoUrl) {
+        const params = new URLSearchParams();
+        params.set('add-repo', route.repoUrl);
+        return `#/sources?${params.toString()}`;
+      }
       return '#/sources';
+    }
     case 'settings':
       return '#/settings';
   }

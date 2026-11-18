@@ -28,7 +28,8 @@ export type BackgroundMessage =
   | { type: 'CHECK_UPDATES_NOW' }
   | { type: 'SET_BADGE_COUNT'; count: number }
   | { type: 'SET_UPDATE_ALARM'; intervalMinutes: number }
-  | { type: 'CLEAR_CF_PROXY_TABS' };
+  | { type: 'CLEAR_CF_PROXY_TABS' }
+  | { type: 'OPEN_EXTENSION_APP'; hash?: string };
 
 export interface UpdateCheckSummary {
   checkedMangas: number;

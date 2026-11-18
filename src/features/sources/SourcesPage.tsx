@@ -19,6 +19,7 @@ import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState 
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
+import { CustomSelect } from '@/src/components/CustomSelect';
 import { db } from '@/src/core/db/db';
 import {
   checkGlobalOriginPermission,
@@ -177,29 +178,31 @@ function SourceInspectorPanel({ source, onClose }: SourceInspectorPanelProps) {
       {/* Step 1: Catalogue / Search */}
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <CustomSelect
+            ariaLabel={t('sources.inspectorTitle')}
+            size="xs"
             value={catMode}
-            onChange={(e) => setCatMode(e.target.value as 'popular' | 'latest' | 'search')}
-            className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-zinc-200"
-          >
-            <option value="popular">{t('sources.inspectorModePopular')}</option>
-            <option value="latest">{t('sources.inspectorModeLatest')}</option>
-            <option value="search">{t('sources.inspectorModeSearch')}</option>
-          </select>
+            options={[
+              { value: 'popular', label: t('sources.inspectorModePopular') },
+              { value: 'latest', label: t('sources.inspectorModeLatest') },
+              { value: 'search', label: t('sources.inspectorModeSearch') },
+            ]}
+            onChange={(val) => setCatMode(val as 'popular' | 'latest' | 'search')}
+          />
           {catMode === 'search' && (
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t('common.search')}
-              className="w-44 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-zinc-200"
+              className="ky-input w-44 rounded-lg px-2.5 py-1.5"
             />
           )}
           <button
             type="button"
             disabled={catRunning}
             onClick={() => void runCatalogueTest()}
-            className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+            className="ky-btn-primary inline-flex items-center gap-1 rounded-lg px-3 py-1.5 font-semibold disabled:opacity-50"
           >
             {catRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
             {t('sources.inspectorRunBtn')}
@@ -356,12 +359,22 @@ function SourceInspectorPanel({ source, onClose }: SourceInspectorPanelProps) {
   );
 }
 
-export function SourcesPage() {
+interface SourcesPageProps {
+  initialRepoUrl?: string;
+}
+
+export function SourcesPage({ initialRepoUrl }: SourcesPageProps) {
   const { t } = useTranslation();
   const repositories = useLiveQuery(() => db.repositories.toArray(), [], []) ?? [];
   const sources = useLiveQuery(() => db.sources.toArray(), [], []) ?? [];
 
-  const [repoUrlInput, setRepoUrlInput] = useState('');
+  const [repoUrlInput, setRepoUrlInput] = useState(initialRepoUrl ?? '');
+
+  useEffect(() => {
+    if (initialRepoUrl) {
+      setRepoUrlInput(initialRepoUrl);
+    }
+  }, [initialRepoUrl]);
   const [addingRepo, setAddingRepo] = useState(false);
   const [refreshingRepoId, setRefreshingRepoId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
@@ -643,23 +656,23 @@ export function SourcesPage() {
       )}
 
       {/* Ajouter un dépôt URL / GitHub */}
-      <section className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-5">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-          <Link2 className="h-4 w-4 text-rose-400" />
+      <section className="ky-surface rounded-2xl border p-5">
+        <h2 className="ky-heading flex items-center gap-2 text-sm font-semibold">
+          <Link2 className="h-4 w-4 text-sky-400" />
           {t('sources.addRepoTitle')}
         </h2>
-        <form onSubmit={(e) => void handleAddRepository(e)} className="mt-3 flex flex-wrap gap-3">
+        <form onSubmit={(e) => void handleAddRepository(e)} className="mt-3 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:gap-3">
           <input
             type="url"
             value={repoUrlInput}
             onChange={(e) => setRepoUrlInput(e.target.value)}
             placeholder={t('sources.repoPlaceholder')}
-            className="min-w-[300px] flex-1 rounded-xl border border-zinc-800 bg-zinc-950 px-4 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+            className="ky-input min-w-0 w-full rounded-xl px-4 py-2.5 text-sm sm:flex-1"
           />
           <button
             type="submit"
             disabled={addingRepo || !repoUrlInput.trim()}
-            className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="ky-btn-primary inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
           >
             {addingRepo ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -669,17 +682,17 @@ export function SourcesPage() {
             {t('sources.addRepoBtn')}
           </button>
         </form>
-        <p className="mt-2 text-xs text-zinc-500">{t('sources.localHint')}</p>
+        <p className="ky-soft mt-2 text-xs">{t('sources.localHint')}</p>
       </section>
 
       {showPasteModal && (
-        <section className="rounded-2xl border border-zinc-700 bg-[#14141e] p-5 space-y-3">
+        <section className="ky-surface space-y-3 rounded-2xl border p-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">{t('sources.pasteModalTitle')}</h3>
+            <h3 className="ky-heading text-sm font-semibold">{t('sources.pasteModalTitle')}</h3>
             <button
               type="button"
               onClick={() => setShowPasteModal(false)}
-              className="text-xs text-zinc-400 hover:text-white"
+              className="ky-muted text-xs hover:text-[var(--ky-text-heading)]"
             >
               {t('common.close')}
             </button>
@@ -689,13 +702,13 @@ export function SourcesPage() {
             value={pastedJson}
             onChange={(e) => setPastedJson(e.target.value)}
             placeholder='{ "id": "my-source", "name": "...", "baseUrl": "https://...", "extends": "origines" }'
-            className="w-full rounded-xl border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
+            className="ky-input w-full rounded-xl p-3 font-mono text-xs"
           />
           <div className="flex justify-end">
             <button
               type="button"
               onClick={() => void handlePasteImport()}
-              className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-500"
+              className="ky-btn-primary rounded-xl px-4 py-2 text-xs font-semibold"
             >
               {t('sources.pasteValidate')}
             </button>
@@ -792,23 +805,23 @@ export function SourcesPage() {
 
           {sources.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+              <div className="relative w-full sm:w-auto">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ky-text-soft)]" />
                 <input
                   type="search"
                   value={sourceQuery}
                   onChange={(e) => setSourceQuery(e.target.value)}
                   placeholder={t('sources.filterSources')}
-                  className="rounded-xl border border-zinc-800 bg-[#12121a] py-1.5 pl-8 pr-3 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+                  className="ky-input w-full rounded-xl py-1.5 pl-8 pr-3 text-xs sm:w-48"
                 />
               </div>
               {availableLangs.length > 1 && (
-                <div className="flex items-center gap-1 rounded-xl border border-zinc-800 bg-[#12121a] p-0.5 text-[11px]">
+                <div className="ky-surface flex flex-wrap items-center gap-1 rounded-xl border p-0.5 text-[11px]">
                   <button
                     type="button"
                     onClick={() => setLangFilter('all')}
-                    className={`rounded-lg px-2 py-1 font-medium ${
-                      langFilter === 'all' ? 'bg-rose-600 text-white' : 'text-zinc-400'
+                    className={`rounded-lg px-2 py-1 font-medium transition ${
+                      langFilter === 'all' ? 'ky-btn-primary' : 'ky-muted hover:text-[var(--ky-text-heading)]'
                     }`}
                   >
                     {t('common.all')}
@@ -818,8 +831,8 @@ export function SourcesPage() {
                       key={lang}
                       type="button"
                       onClick={() => setLangFilter(lang)}
-                      className={`rounded-lg px-2 py-1 font-medium uppercase ${
-                        langFilter === lang ? 'bg-rose-600 text-white' : 'text-zinc-400'
+                      className={`rounded-lg px-2 py-1 font-medium uppercase transition ${
+                        langFilter === lang ? 'ky-btn-primary' : 'ky-muted hover:text-[var(--ky-text-heading)]'
                       }`}
                     >
                       {lang}
@@ -899,9 +912,9 @@ export function SourcesPage() {
                       type="button"
                       onClick={() => navigate({ name: 'explore', sourceId: source.id })}
                       disabled={!source.enabled}
-                      className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-800 disabled:opacity-40"
+                      className="ky-btn-secondary inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-medium disabled:opacity-40"
                     >
-                      <Compass className="h-3.5 w-3.5 text-rose-400" />
+                      <Compass className="h-3.5 w-3.5 text-sky-400" />
                       {t('sources.exploreBtn')}
                     </button>
 
@@ -912,8 +925,8 @@ export function SourcesPage() {
                       }
                       className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
                         inspectingSourceId === source.id
-                          ? 'border-rose-500/50 bg-rose-500/15 text-rose-200'
-                          : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                          ? 'ky-pill-active border-transparent'
+                          : 'ky-btn-secondary'
                       }`}
                     >
                       <Wrench className="h-3.5 w-3.5" />

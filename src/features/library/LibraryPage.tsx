@@ -3,6 +3,7 @@ import { BookMarked, Compass, Loader2, Play, Plus, RefreshCw, Search, Tag, X } f
 import { type FormEvent, useMemo, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
+import { CustomSelect } from '@/src/components/CustomSelect';
 import { UpdateCheckStatusBanner } from '@/src/components/UpdateCheckStatusBanner';
 import { DEFAULT_APP_SETTINGS, db } from '@/src/core/db/db';
 import { addCustomCategory, removeCustomCategory } from '@/src/core/db/mangaRepository';
@@ -131,59 +132,60 @@ export function LibraryPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-4">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">{t('library.title')}</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <h1 className="ky-heading text-2xl font-bold tracking-tight">{t('library.title')}</h1>
+          <p className="ky-muted mt-1 text-sm">
             {t('library.subtitle', { count: favorites.length })}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+          <div className="relative w-full sm:w-52">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ky-text-soft)]" />
             <input
               type="search"
               value={titleQuery}
               onChange={(e) => setTitleQuery(e.target.value)}
               placeholder={t('library.filterPlaceholder')}
-              className="rounded-xl border border-zinc-800 bg-[#12121a] py-2 pl-9 pr-3 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+              className="ky-input w-full rounded-xl py-2 pl-9 pr-3 text-xs"
             />
           </div>
 
           {allSources.length > 1 && (
-            <select
-              aria-label={t('library.filterSourceAria')}
+            <CustomSelect
+              ariaLabel={t('library.filterSourceAria')}
               value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value)}
-              className="rounded-xl border border-zinc-800 bg-[#12121a] px-3 py-2 text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
-            >
-              <option value="all">{t('library.allSources')}</option>
-              {allSources.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: 'all', label: t('library.allSources') },
+                ...allSources.map((s) => ({
+                  value: s.id,
+                  label: s.name,
+                  badge: s.lang.toUpperCase(),
+                })),
+              ]}
+              onChange={setSourceFilter}
+            />
           )}
 
-          <select
-            aria-label={t('library.sortAria')}
+          <CustomSelect
+            ariaLabel={t('library.sortAria')}
+            align="right"
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as LibrarySortKey)}
-            className="rounded-xl border border-zinc-800 bg-[#12121a] px-3 py-2 text-xs text-zinc-200 focus:border-rose-500/60 focus:outline-none"
-          >
-            <option value="updated">{t('library.sortUpdated')}</option>
-            <option value="unread">{t('library.sortUnread')}</option>
-            <option value="title">{t('library.sortTitle')}</option>
-            <option value="added">{t('library.sortAdded')}</option>
-          </select>
+            options={[
+              { value: 'updated', label: t('library.sortUpdated') },
+              { value: 'unread', label: t('library.sortUnread') },
+              { value: 'title', label: t('library.sortTitle') },
+              { value: 'added', label: t('library.sortAdded') },
+            ]}
+            onChange={(val) => setSortBy(val as LibrarySortKey)}
+          />
 
           <button
             type="button"
             disabled={checkingUpdates || favorites.length === 0}
             onClick={() => void handleCheckAllUpdates()}
-            className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-500 disabled:opacity-50"
+            className="ky-btn-primary inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold disabled:opacity-50"
           >
             {checkingUpdates ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -196,7 +198,7 @@ export function LibraryPage() {
       </header>
 
       {/* Onglets de statut */}
-      <div className="flex flex-wrap gap-1.5 border-b border-zinc-800/80 pb-3">
+      <div className="flex flex-wrap gap-1.5 border-b border-[var(--ky-border)] pb-3">
         {FILTER_KEYS.map((key) => {
           const count = tabCounts[key] ?? 0;
           if (key === 'dropped' && count === 0 && statusFilter !== 'dropped') return null;
@@ -207,12 +209,12 @@ export function LibraryPage() {
               onClick={() => setStatusFilter(key)}
               className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-semibold transition ${
                 statusFilter === key
-                  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
-                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                  ? 'ky-pill-active'
+                  : 'text-[var(--ky-text-muted)] hover:bg-[var(--ky-surface-hover)] hover:text-[var(--ky-text-heading)]'
               }`}
             >
               <span>{t(`libStatus.${key}`)}</span>
-              <span className="rounded bg-zinc-900/90 px-1.5 py-0.5 text-[10px] tabular-nums text-zinc-400">
+              <span className="rounded bg-[var(--ky-surface-2)] px-1.5 py-0.5 text-[10px] tabular-nums text-[var(--ky-text-muted)]">
                 {count}
               </span>
             </button>
@@ -222,8 +224,8 @@ export function LibraryPage() {
 
       {/* Custom categories bar */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500">
-          <Tag className="h-3.5 w-3.5" />
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--ky-text-soft)]">
+          <Tag className="h-3.5 w-3.5 text-violet-400" />
           {t('categories.label')}:
         </span>
         <button
@@ -231,8 +233,8 @@ export function LibraryPage() {
           onClick={() => setCategoryFilter('all')}
           className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
             categoryFilter === 'all'
-              ? 'bg-zinc-800 text-white'
-              : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+              ? 'ky-pill-active'
+              : 'text-[var(--ky-text-muted)] hover:bg-[var(--ky-surface-hover)] hover:text-[var(--ky-text-heading)]'
           }`}
         >
           {t('categories.all')}
@@ -242,8 +244,8 @@ export function LibraryPage() {
             key={cat}
             className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs font-medium transition ${
               categoryFilter === cat
-                ? 'border-rose-500/40 bg-rose-500/15 text-rose-200'
-                : 'border-zinc-800 bg-[#12121a] text-zinc-300'
+                ? 'ky-pill-active border-transparent'
+                : 'border-[var(--ky-border)] bg-[var(--ky-surface)] text-[var(--ky-text-secondary)]'
             }`}
           >
             <button type="button" onClick={() => setCategoryFilter(cat)} className="px-0.5">
@@ -257,7 +259,7 @@ export function LibraryPage() {
                 if (categoryFilter === cat) setCategoryFilter('all');
                 void removeCustomCategory(cat);
               }}
-              className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-rose-300"
+              className="rounded p-0.5 text-[var(--ky-text-soft)] hover:bg-black/20 hover:text-rose-400"
             >
               <X className="h-3 w-3" />
             </button>
@@ -269,8 +271,8 @@ export function LibraryPage() {
             onClick={() => setCategoryFilter('__uncategorized__')}
             className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
               categoryFilter === '__uncategorized__'
-                ? 'bg-zinc-800 text-white'
-                : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                ? 'ky-pill-active'
+                : 'text-[var(--ky-text-muted)] hover:bg-[var(--ky-surface-hover)] hover:text-[var(--ky-text-heading)]'
             }`}
           >
             {t('categories.uncategorized')}
@@ -291,12 +293,12 @@ export function LibraryPage() {
             value={newCategoryName}
             onChange={(e) => setNewCategoryName(e.target.value)}
             placeholder={t('categories.newPlaceholder')}
-            className="w-36 rounded-lg border border-zinc-800 bg-[#12121a] px-2.5 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+            className="ky-input w-36 rounded-lg px-2.5 py-1 text-xs"
           />
           <button
             type="submit"
             disabled={!newCategoryName.trim()}
-            className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            className="ky-btn-secondary inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium disabled:opacity-40"
           >
             <Plus className="h-3 w-3" />
             {t('categories.addBtn')}
@@ -312,22 +314,22 @@ export function LibraryPage() {
       />
 
       {favorites.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-zinc-800 bg-[#111118] p-14 text-center">
-          <BookMarked className="mx-auto h-11 w-11 text-zinc-600" />
-          <h2 className="mt-4 text-lg font-semibold text-white">{t('library.emptyTitle')}</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-zinc-400">{t('library.emptyDesc')}</p>
+        <div className="ky-surface rounded-3xl border border-dashed p-10 text-center sm:p-14">
+          <BookMarked className="mx-auto h-11 w-11 text-[var(--ky-accent-text)] opacity-80" />
+          <h2 className="ky-heading mt-4 text-lg font-semibold">{t('library.emptyTitle')}</h2>
+          <p className="ky-muted mx-auto mt-2 max-w-md text-sm">{t('library.emptyDesc')}</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <button
               type="button"
               onClick={() => navigate({ name: 'sources' })}
-              className="rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2.5 text-xs font-semibold text-zinc-200 hover:bg-zinc-800"
+              className="ky-btn-secondary rounded-xl px-4 py-2.5 text-xs font-semibold"
             >
               {t('library.configureSources')}
             </button>
             <button
               type="button"
               onClick={() => navigate({ name: 'explore' })}
-              className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-rose-500"
+              className="ky-btn-primary inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-xs font-semibold"
             >
               <Compass className="h-4 w-4" />
               {t('library.exploreManga')}
@@ -335,11 +337,11 @@ export function LibraryPage() {
           </div>
         </div>
       ) : visibleMangas.length === 0 ? (
-        <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-10 text-center text-sm text-zinc-400">
+        <div className="ky-surface ky-muted rounded-2xl border p-10 text-center text-sm">
           {t('library.noFilterMatch')}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
           {visibleMangas.map((manga) => {
             const preferredSrc = manga.preferredSourceId
               ? sourceById.get(manga.preferredSourceId)
@@ -347,14 +349,14 @@ export function LibraryPage() {
             return (
               <div
                 key={manga.id}
-                className="group relative flex flex-col overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#12121a] transition hover:-translate-y-0.5 hover:border-rose-500/50"
+                className="ky-card group relative flex flex-col overflow-hidden rounded-2xl hover:-translate-y-0.5"
               >
                 <button
                   type="button"
                   onClick={() => navigate({ name: 'manga', mangaId: manga.id })}
                   className="flex flex-1 flex-col text-left"
                 >
-                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-900">
+                  <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/25">
                     <AntiHotlinkImage
                       src={manga.coverUrl}
                       referer={preferredSrc?.baseUrl}
@@ -362,18 +364,18 @@ export function LibraryPage() {
                       className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                     />
                     {manga.unreadCount > 0 && (
-                      <span className="absolute right-2 top-2 rounded-lg bg-rose-600 px-2 py-0.5 text-xs font-bold text-white shadow">
+                      <span className="ky-accent-badge absolute right-2 top-2 rounded-lg px-2 py-0.5 text-xs font-bold shadow">
                         {manga.unreadCount}
                       </span>
                     )}
                     {preferredSrc && (
-                      <span className="absolute bottom-2 left-2 rounded-md bg-zinc-950/85 px-2 py-0.5 text-[10px] font-medium text-zinc-300 backdrop-blur">
+                      <span className="absolute bottom-2 left-2 rounded-md bg-slate-950/80 px-2 py-0.5 text-[10px] font-medium text-sky-200 ring-1 ring-white/10 backdrop-blur">
                         {preferredSrc.name}
                       </span>
                     )}
                   </div>
-                  <div className="p-3">
-                    <h3 className="line-clamp-2 text-sm font-semibold text-zinc-100 group-hover:text-rose-300">
+                  <div className="p-2.5 sm:p-3">
+                    <h3 className="ky-heading line-clamp-2 text-xs font-semibold group-hover:text-[var(--ky-accent-text)] sm:text-sm">
                       {manga.title}
                     </h3>
                   </div>
@@ -382,7 +384,7 @@ export function LibraryPage() {
                   type="button"
                   title={t('library.resumeTooltip')}
                   onClick={() => void handleQuickReadManga(manga)}
-                  className="absolute bottom-14 right-2 rounded-xl bg-rose-600 p-2 text-white opacity-0 shadow-lg transition hover:bg-rose-500 group-hover:opacity-100"
+                  className="ky-btn-primary absolute bottom-12 right-2 rounded-xl p-2 opacity-90 shadow-lg transition sm:bottom-14 sm:opacity-0 sm:group-hover:opacity-100"
                 >
                   <Play className="h-3.5 w-3.5 fill-current" />
                 </button>

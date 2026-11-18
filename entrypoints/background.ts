@@ -167,6 +167,13 @@ export default defineBackground(() => {
           sendResponse({ ok: true });
           break;
         }
+        case 'OPEN_EXTENSION_APP': {
+          const safeHash =
+            typeof message.hash === 'string' && message.hash.startsWith('#/') ? message.hash : '';
+          await openOrFocusAppTab(safeHash);
+          sendResponse({ ok: true });
+          break;
+        }
         default: {
           sendResponse({ ok: false });
         }

@@ -22,7 +22,7 @@ export function App() {
       {route.name === 'reader' && (
         <ReaderPage mangaId={route.mangaId} chapterId={route.chapterId} />
       )}
-      {route.name === 'sources' && <SourcesPage />}
+      {route.name === 'sources' && <SourcesPage initialRepoUrl={route.repoUrl} />}
       {route.name === 'settings' && <SettingsPage />}
     </AppShell>
   );

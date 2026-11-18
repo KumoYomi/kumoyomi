@@ -43,6 +43,7 @@ Network requests are initiated **exclusively** toward:
 - **`declarativeNetRequest` & `declarativeNetRequestWithHostAccess`**: Set compliant `Referer` / `Origin` headers on extension-initiated fetches to enabled manga/CDN hosts so covers and chapter pages load without hotlink errors.
 - **`tabs` & `scripting` (`tabHide` on Firefox)**: Open or focus the KumoYomi reader tab, assist with human challenge popups on sites you access, hide cleared background verification helper tabs cleanly from Firefox's tab strip so they do not clutter your open tabs, and read/fetch directly from a tab you already cleared in the browser when cookies are partitioned.
 - **`host_permissions` / `optional_host_permissions`**: Required only to fetch series metadata and images from whichever arbitrary external source repositories and websites you choose to configure. On the Firefox AMO *Listed* build (`optional_host_permissions`), host access is requested strictly on user interaction.
+- **Launcher content script (`https://kumoyomi.github.io/*`)**: Runs exclusively on KumoYomi's official GitHub Pages portal so the website can detect whether KumoYomi is installed and open your local extension tab (or prefill a shared `?add-repo=` URL) on click. No browsing history or external pages are ever read.
 
 ---
 

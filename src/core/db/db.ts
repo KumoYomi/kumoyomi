@@ -36,6 +36,8 @@ export function detectBrowserLocale(): AppLocale {
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   id: 'default',
   language: detectBrowserLocale(),
+  themeMode: 'midnight',
+  accentColor: 'aurora',
   readerMode: 'webtoon',
   readingDirection: 'ltr',
   pageFitMode: 'contain',

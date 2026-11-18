@@ -87,18 +87,18 @@ export function UpdatesPage() {
   }
 
   return (
-    <div className="space-y-9">
+    <div className="space-y-8">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">{t('updates.title')}</h1>
-          <p className="mt-1 text-sm text-zinc-400">{t('updates.subtitle')}</p>
+          <h1 className="ky-heading text-2xl font-bold tracking-tight">{t('updates.title')}</h1>
+          <p className="ky-muted mt-1 text-sm">{t('updates.subtitle')}</p>
         </div>
 
         <button
           type="button"
           disabled={checkingUpdates}
           onClick={() => void handleCheckUpdates()}
-          className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-rose-500 disabled:opacity-50"
+          className="ky-btn-primary inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold disabled:opacity-50"
         >
           {checkingUpdates ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -118,41 +118,41 @@ export function UpdatesPage() {
 
       {/* Local reading statistics */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
-            <BookMarked className="h-3.5 w-3.5 text-rose-400" />
+        <div className="ky-surface rounded-2xl border p-4">
+          <div className="flex items-center gap-2 text-xs text-[var(--ky-text-muted)]">
+            <BookMarked className="h-3.5 w-3.5 text-[var(--ky-accent-text)]" />
             <span>{t('stats.followedSeries')}</span>
           </div>
-          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{followedCount}</p>
+          <p className="ky-heading mt-1.5 text-2xl font-bold tabular-nums">{followedCount}</p>
         </div>
-        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <div className="ky-surface rounded-2xl border p-4">
+          <div className="flex items-center gap-2 text-xs text-[var(--ky-text-muted)]">
             <BookOpenCheck className="h-3.5 w-3.5 text-emerald-400" />
             <span>{t('stats.chaptersRead')}</span>
           </div>
-          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{readChaptersCount}</p>
+          <p className="ky-heading mt-1.5 text-2xl font-bold tabular-nums">{readChaptersCount}</p>
         </div>
-        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
-            <Clock className="h-3.5 w-3.5 text-indigo-400" />
+        <div className="ky-surface rounded-2xl border p-4">
+          <div className="flex items-center gap-2 text-xs text-[var(--ky-text-muted)]">
+            <Clock className="h-3.5 w-3.5 text-sky-400" />
             <span>{t('stats.historyEntries')}</span>
           </div>
-          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{totalHistoryCount}</p>
+          <p className="ky-heading mt-1.5 text-2xl font-bold tabular-nums">{totalHistoryCount}</p>
         </div>
-        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <div className="ky-surface rounded-2xl border p-4">
+          <div className="flex items-center gap-2 text-xs text-[var(--ky-text-muted)]">
             <HardDrive className="h-3.5 w-3.5 text-amber-400" />
             <span>{t('stats.offlineChapters')}</span>
           </div>
-          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{offlineCount}</p>
+          <p className="ky-heading mt-1.5 text-2xl font-bold tabular-nums">{offlineCount}</p>
         </div>
       </section>
 
       {/* Historique de lecture */}
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            <Clock className="h-4 w-4 text-rose-400" />
+          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-[var(--ky-text-muted)]">
+            <Clock className="h-4 w-4 text-sky-400" />
             {t('updates.resumeSection')}
           </div>
           {historyEntries.length > 0 && (
@@ -161,7 +161,7 @@ export function UpdatesPage() {
                 <button
                   type="button"
                   onClick={() => setShowAllHistory((v) => !v)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                  className="ky-btn-secondary rounded-lg px-2.5 py-1 text-xs font-medium"
                 >
                   {showAllHistory ? t('updates.collapse') : t('updates.showAll')}
                 </button>
@@ -169,7 +169,7 @@ export function UpdatesPage() {
               <button
                 type="button"
                 onClick={() => void db.history.clear()}
-                className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-400 hover:border-rose-500/40 hover:text-rose-300"
+                className="ky-btn-secondary inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium hover:text-rose-400"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {t('updates.clearHistory')}
@@ -179,7 +179,7 @@ export function UpdatesPage() {
         </div>
 
         {historyEntries.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-8 text-center text-sm text-zinc-500">
+          <div className="ky-surface ky-soft rounded-2xl border p-8 text-center text-sm">
             {t('updates.emptyHistory')}
           </div>
         ) : (
@@ -189,12 +189,12 @@ export function UpdatesPage() {
               return (
                 <div
                   key={entry.id}
-                  className="flex items-center gap-3.5 rounded-2xl border border-zinc-800/80 bg-[#12121a] p-3 transition hover:border-zinc-700"
+                  className="ky-card flex items-center gap-3.5 rounded-2xl p-3"
                 >
                   <button
                     type="button"
                     onClick={() => navigate({ name: 'manga', mangaId: entry.mangaId })}
-                    className="h-20 w-14 shrink-0 overflow-hidden rounded-xl bg-zinc-900"
+                    className="h-20 w-14 shrink-0 overflow-hidden rounded-xl bg-black/30"
                   >
                     <AntiHotlinkImage
                       src={entry.coverUrl}
@@ -208,12 +208,12 @@ export function UpdatesPage() {
                     <button
                       type="button"
                       onClick={() => navigate({ name: 'manga', mangaId: entry.mangaId })}
-                      className="block truncate text-left text-sm font-semibold text-white hover:text-rose-300"
+                      className="ky-heading block truncate text-left text-sm font-semibold hover:text-[var(--ky-accent-text)]"
                     >
                       {entry.mangaTitle}
                     </button>
-                    <p className="truncate text-xs text-zinc-400">{entry.chapterTitle}</p>
-                    <p className="mt-1 text-[11px] text-zinc-500">
+                    <p className="ky-muted truncate text-xs">{entry.chapterTitle}</p>
+                    <p className="ky-soft mt-1 text-[11px]">
                       {t('updates.pageProgress', { page: entry.pageIndex + 1 })}
                       {entry.totalPages > 0 ? ` / ${entry.totalPages}` : ''} ·{' '}
                       {formatDate(entry.readAt)}
@@ -229,7 +229,7 @@ export function UpdatesPage() {
                         chapterId: entry.chapterId,
                       })
                     }
-                    className="shrink-0 rounded-xl bg-rose-600 p-2.5 text-white transition hover:bg-rose-500"
+                    className="ky-btn-primary shrink-0 rounded-xl p-2.5"
                     title={t('updates.resumeBtn')}
                   >
                     <Play className="h-4 w-4 fill-current" />
@@ -244,8 +244,8 @@ export function UpdatesPage() {
       {/* Nouveaux chapitres détectés */}
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            <Bell className="h-4 w-4 text-rose-400" />
+          <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-[var(--ky-text-muted)]">
+            <Bell className="h-4 w-4 text-[var(--ky-accent-text)]" />
             {t('updates.newChaptersSection', { count: newChapters.length })}
           </div>
           {newChapters.length > 0 && (
@@ -254,7 +254,7 @@ export function UpdatesPage() {
                 <button
                   type="button"
                   onClick={() => setShowAllNew((v) => !v)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                  className="ky-btn-secondary rounded-lg px-2.5 py-1 text-xs font-medium"
                 >
                   {showAllNew ? t('updates.collapse') : t('updates.showAll')}
                 </button>
@@ -262,9 +262,9 @@ export function UpdatesPage() {
               <button
                 type="button"
                 onClick={() => void handleDismissNewFlags()}
-                className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                className="ky-btn-secondary inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium"
               >
-                <CheckCheck className="h-3.5 w-3.5 text-rose-400" />
+                <CheckCheck className="h-3.5 w-3.5 text-emerald-400" />
                 {t('updates.markAllSeen')}
               </button>
             </div>
@@ -272,21 +272,21 @@ export function UpdatesPage() {
         </div>
 
         {newChapters.length === 0 ? (
-          <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-8 text-center text-sm text-zinc-500">
+          <div className="ky-surface ky-soft rounded-2xl border p-8 text-center text-sm">
             {t('updates.emptyNew')}
           </div>
         ) : (
-          <div className="divide-y divide-zinc-800/70 overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#12121a]">
+          <div className="ky-surface divide-y divide-[var(--ky-border)] overflow-hidden rounded-2xl border">
             {newChapters.map((ch) => {
               const m = mangaMap.get(ch.mangaId);
               const s = sourceMap.get(ch.sourceId);
               return (
                 <div
                   key={ch.id}
-                  className="flex items-center justify-between gap-4 px-4 py-3 hover:bg-zinc-900/60"
+                  className="flex items-center justify-between gap-3 px-3.5 py-3 transition hover:bg-[var(--ky-surface-hover)] sm:gap-4 sm:px-4"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-zinc-900">
+                    <div className="h-12 w-9 shrink-0 overflow-hidden rounded-lg bg-black/30">
                       <AntiHotlinkImage
                         src={m?.coverUrl}
                         referer={s?.baseUrl}
@@ -298,11 +298,11 @@ export function UpdatesPage() {
                       <button
                         type="button"
                         onClick={() => navigate({ name: 'manga', mangaId: ch.mangaId })}
-                        className="block truncate text-left text-sm font-semibold text-white hover:text-rose-300"
+                        className="ky-heading block truncate text-left text-sm font-semibold hover:text-[var(--ky-accent-text)]"
                       >
                         {m?.title ?? t('common.series')}
                       </button>
-                      <p className="truncate text-xs text-zinc-400">
+                      <p className="ky-muted truncate text-xs">
                         {ch.title} {s ? `· ${s.name}` : ''}
                       </p>
                     </div>
@@ -313,7 +313,7 @@ export function UpdatesPage() {
                     onClick={() =>
                       navigate({ name: 'reader', mangaId: ch.mangaId, chapterId: ch.id })
                     }
-                    className="shrink-0 rounded-xl bg-rose-600/90 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-rose-500"
+                    className="ky-btn-primary shrink-0 rounded-xl px-3.5 py-1.5 text-xs font-semibold"
                   >
                     {t('common.read')}
                   </button>

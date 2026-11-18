@@ -13,6 +13,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
+import { CustomSelect } from '@/src/components/CustomSelect';
 import { db, normalizeMangaKey } from '@/src/core/db/db';
 import { upsertMangaFromCatalogueItem } from '@/src/core/db/mangaRepository';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
@@ -288,14 +289,14 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
       <header className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">{t('explore.title')}</h1>
-            <p className="mt-1 text-sm text-zinc-400">{t('explore.subtitle')}</p>
+            <h1 className="ky-heading text-2xl font-bold tracking-tight">{t('explore.title')}</h1>
+            <p className="ky-muted mt-1 text-sm">{t('explore.subtitle')}</p>
           </div>
         </div>
 
-        <form onSubmit={handleSearchSubmit} className="flex flex-wrap gap-3">
-          <div className="relative min-w-[280px] flex-1">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+        <form onSubmit={handleSearchSubmit} className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:gap-3">
+          <div className="relative min-w-0 w-full sm:flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ky-text-soft)]" />
             <input
               id="global-search-input"
               type="search"
@@ -308,34 +309,36 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 }
               }}
               placeholder={t('explore.searchPlaceholder')}
-              className="w-full rounded-xl border border-zinc-800 bg-[#12121a] py-3 pl-11 pr-4 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-rose-500/60 focus:outline-none"
+              className="ky-input w-full rounded-xl py-3 pl-11 pr-4 text-sm"
             />
           </div>
-          <button
-            type="submit"
-            disabled={!searchInput.trim()}
-            className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-500 disabled:opacity-50"
-          >
-            {anySourceLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Search className="h-4 w-4" />
-            )}
-            {t('common.search')}
-          </button>
-          {activeQuery && (
+          <div className="flex items-center gap-2">
             <button
-              type="button"
-              onClick={() => {
-                setSearchInput('');
-                setActiveQuery('');
-                setSearchStates({});
-              }}
-              className="rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+              type="submit"
+              disabled={!searchInput.trim()}
+              className="ky-btn-primary inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold disabled:opacity-50 sm:flex-initial"
             >
-              {t('common.clear')}
+              {anySourceLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+              {t('common.search')}
             </button>
-          )}
+            {activeQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchInput('');
+                  setActiveQuery('');
+                  setSearchStates({});
+                }}
+                className="ky-btn-secondary rounded-xl px-4 py-3 text-xs font-medium"
+              >
+                {t('common.clear')}
+              </button>
+            )}
+          </div>
         </form>
       </header>
 
@@ -460,32 +463,31 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
       ) : (
         <section className="space-y-5">
           {/* Barre de sélection source & tri */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-800/80 bg-[#12121a] p-3">
+          <div className="ky-surface flex flex-col gap-3 rounded-2xl border p-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2 text-xs font-medium text-zinc-400">
+              <span className="ky-muted px-1 text-xs font-medium">
                 {t('explore.catalogueLabel')}
               </span>
-              <select
+              <CustomSelect
+                ariaLabel={t('explore.catalogueLabel')}
                 value={activeBrowseSource?.id ?? ''}
-                onChange={(e) => setSelectedSourceId(e.target.value)}
-                className="rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm font-medium text-zinc-100 focus:border-rose-500 focus:outline-none"
-              >
-                {enabledSources.map((src) => (
-                  <option key={src.id} value={src.id}>
-                    {src.name} ({src.lang.toUpperCase()})
-                  </option>
-                ))}
-              </select>
+                options={enabledSources.map((src) => ({
+                  value: src.id,
+                  label: src.name,
+                  badge: src.lang.toUpperCase(),
+                }))}
+                onChange={setSelectedSourceId}
+              />
             </div>
 
-            <div className="flex items-center gap-1.5 rounded-xl bg-zinc-950 p-1">
+            <div className="flex items-center gap-1.5 self-start rounded-xl bg-[var(--ky-surface-2)] p-1 sm:self-auto">
               <button
                 type="button"
                 onClick={() => setBrowseMode('popular')}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                   browseMode === 'popular'
-                    ? 'bg-rose-600 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                    ? 'ky-btn-primary'
+                    : 'text-[var(--ky-text-muted)] hover:text-[var(--ky-text-heading)]'
                 }`}
               >
                 <TrendingUp className="h-3.5 w-3.5" />
@@ -496,8 +498,8 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 onClick={() => setBrowseMode('latest')}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                   browseMode === 'latest'
-                    ? 'bg-rose-600 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200'
+                    ? 'ky-btn-primary'
+                    : 'text-[var(--ky-text-muted)] hover:text-[var(--ky-text-heading)]'
                 }`}
               >
                 <Sparkles className="h-3.5 w-3.5" />
@@ -521,15 +523,15 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {browseItems.map((item) => (
               <button
                 key={`${item.sourceId}-${item.url}`}
                 type="button"
                 onClick={() => void handleOpenCatalogueItem(item)}
-                className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-800/80 bg-[#12121a] text-left transition hover:-translate-y-0.5 hover:border-rose-500/50"
+                className="ky-card group flex flex-col overflow-hidden rounded-2xl text-left hover:-translate-y-0.5"
               >
-                <div className="relative aspect-[3/4] w-full overflow-hidden bg-zinc-900">
+                <div className="relative aspect-[3/4] w-full overflow-hidden bg-black/25">
                   <AntiHotlinkImage
                     src={item.coverUrl}
                     referer={activeBrowseSource?.baseUrl}
@@ -537,13 +539,13 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                     className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
                   />
                   {item.latestChapter && (
-                    <span className="absolute bottom-2 left-2 rounded-md bg-zinc-950/85 px-2 py-0.5 text-[11px] font-medium text-zinc-200 backdrop-blur">
+                    <span className="absolute bottom-2 left-2 rounded-md bg-slate-950/80 px-2 py-0.5 text-[11px] font-medium text-sky-200 ring-1 ring-white/10 backdrop-blur">
                       {item.latestChapter}
                     </span>
                   )}
                 </div>
-                <div className="p-3">
-                  <h3 className="line-clamp-2 text-sm font-semibold text-zinc-100 group-hover:text-rose-300">
+                <div className="p-2.5 sm:p-3">
+                  <h3 className="ky-heading line-clamp-2 text-xs font-semibold group-hover:text-[var(--ky-accent-text)] sm:text-sm">
                     {item.title}
                   </h3>
                 </div>
@@ -555,20 +557,20 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
               Array.from({ length: 12 }).map((_, idx) => (
                 <div
                   key={`b-skel-${idx}`}
-                  className="overflow-hidden rounded-2xl border border-zinc-800/70 bg-[#12121a]"
+                  className="ky-surface overflow-hidden rounded-2xl border"
                 >
-                  <div className="aspect-[3/4] w-full animate-pulse bg-zinc-800/60" />
+                  <div className="aspect-[3/4] w-full animate-pulse bg-[var(--ky-surface-2)]" />
                   <div className="space-y-2 p-3">
-                    <div className="h-4 w-4/5 animate-pulse rounded bg-zinc-800/80" />
+                    <div className="h-4 w-4/5 animate-pulse rounded bg-[var(--ky-surface-2)]" />
                   </div>
                 </div>
               ))}
           </div>
 
           {!browseLoading && !browseError && browseItems.length === 0 && (
-            <div className="rounded-2xl border border-zinc-800 bg-[#12121a] p-10 text-center">
-              <Compass className="mx-auto h-8 w-8 text-zinc-600" />
-              <p className="mt-2 text-sm text-zinc-400">{t('explore.emptyCatalogue')}</p>
+            <div className="ky-surface rounded-2xl border p-10 text-center">
+              <Compass className="ky-soft mx-auto h-8 w-8" />
+              <p className="ky-muted mt-2 text-sm">{t('explore.emptyCatalogue')}</p>
             </div>
           )}
 
@@ -580,7 +582,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 onClick={() =>
                   void loadBrowseCatalogue(activeBrowseSource, browseMode, browsePage + 1, true)
                 }
-                className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-6 py-2.5 text-sm font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                className="ky-btn-secondary inline-flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-semibold disabled:opacity-50"
               >
                 {browseLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                 {t('explore.loadMore')}
