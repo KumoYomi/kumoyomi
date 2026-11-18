@@ -287,4 +287,60 @@ export const es: TranslationDict = {
   'cf.openTabTitle': 'Abrir en una pestaña normal',
   'cf.dismissAlert': 'Cerrar alerta',
   'image.unavailable': 'Imagen bloqueada o no disponible',
+
+  // Novedades v0.4.0
+  'shell.permBannerTitle': 'Se requiere permiso web para las fuentes',
+  'shell.permBannerDesc':
+    'Concede acceso para que KumoYomi pueda cargar tus repositorios e imágenes sin bloqueos.',
+  'shell.permGrantBtn': 'Conceder acceso',
+
+  'sources.deleteSource': 'Eliminar esta fuente',
+  'sources.inspectBtn': 'Inspeccionar',
+  'sources.inspectorTitle': 'Inspector de fuente (Catálogo · Detalles · Capítulos · Páginas)',
+  'sources.inspectorClose': 'Cerrar inspector',
+  'sources.inspectorModePopular': 'Populares',
+  'sources.inspectorModeLatest': 'Recientes',
+  'sources.inspectorModeSearch': 'Buscar',
+  'sources.inspectorRunBtn': 'Ejecutar',
+  'sources.inspectorDuration': '{{ms}} ms',
+  'sources.inspectorHasNext': 'Siguiente página: {{val}}',
+  'sources.inspectorUseManga': 'Probar detalles →',
+  'sources.inspectorUseChapter': 'Probar páginas →',
+  'sources.inspectorMangaUrlPlaceholder': 'URL del manga (del catálogo o pegada)...',
+  'sources.inspectorChapterUrlPlaceholder': 'URL del capítulo (de la ficha o pegada)...',
+  'sources.inspectorDetailsSection': 'Detalles y Capítulos ({{count}})',
+  'sources.inspectorPagesSection': 'Páginas del capítulo',
+  'sources.inspectorPagesCount': '{{count}} página(s) extraída(s)',
+  'sources.inspectorPreviewLabel': 'Vista previa página 1 (anti-hotlink verificado):',
+
+  'settings.desktopNotificationsDesc':
+    'Mostrar una notificación del sistema cuando la comprobación en segundo plano detecte capítulos nuevos.',
+  'settings.autoDeleteOfflineDesc':
+    'Eliminar automáticamente la caché sin conexión de un capítulo al marcarlo como leído.',
+
+  'categories.label': 'Categorías',
+  'categories.all': 'Todas',
+  'categories.uncategorized': 'Sin categoría',
+  'categories.newPlaceholder': 'Nueva categoría...',
+  'categories.addBtn': 'Añadir',
+  'categories.removeTooltip': 'Eliminar categoría {{name}}',
+
+  'stats.followedSeries': 'Series seguidas',
+  'stats.chaptersRead': 'Capítulos leídos',
+  'stats.historyEntries': 'Historial',
+  'stats.offlineChapters': 'Sin conexión',
+
+  'reader.helpTooltip': 'Atajos de teclado (?)',
+  'reader.helpTitle': 'Controles y atajos del lector',
+  'reader.helpKeyArrows': '← / → : Página anterior o siguiente (según dirección)',
+  'reader.helpKeySpace': 'Espacio : Desplazar (Webtoon) o página siguiente',
+  'reader.helpKeyFullscreen': 'F : Pantalla completa',
+  'reader.helpKeyMode': 'M : Cambiar modo (Webtoon / Página / Doble)',
+  'reader.helpKeyChapters': '[ / ] : Capítulo anterior o siguiente',
+  'reader.helpKeyHelp': '? o H : Abrir/cerrar esta ayuda',
+  'reader.helpKeyEsc': 'Esc : Volver a la ficha del manga',
+  'reader.helpClickZones': 'Ratón: clic izquierdo/derecho (30 %) pasa página, centro alterna HUD',
+
+  'notifications.newChaptersTitle': 'KumoYomi — Nuevos capítulos disponibles',
+  'notifications.newChaptersBody': 'Se detectaron {{count}} capítulo(s) nuevo(s) en tu biblioteca.',
 } satisfies TranslationDict;

@@ -1,6 +1,8 @@
 import { ExternalLink, Loader2, RefreshCw, ShieldAlert, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
+  getLastCloudflareUnlockTime,
+  onCloudflareDomainUnlocked,
   openExternalTab,
   requestCloudflareVerificationPopup,
 } from '@/src/core/extension/browserBridge';
@@ -29,11 +31,33 @@ export function CloudflareBanner({
   const [dismissed, setDismissed] = useState(false);
   const onRetryRef = useRef(onRetry);
   onRetryRef.current = onRetry;
+  const mountedAtRef = useRef(Date.now());
+  const autoRetriedRef = useRef(false);
 
   useEffect(() => {
+    mountedAtRef.current = Date.now();
+    autoRetriedRef.current = false;
     setDismissed(false);
     setWaitingUnlock(false);
     setVerifyingPopup(false);
+
+    if (getLastCloudflareUnlockTime(url) >= mountedAtRef.current - 2500) {
+      setDismissed(true);
+      if (onRetryRef.current) {
+        autoRetriedRef.current = true;
+        onRetryRef.current();
+      }
+      return;
+    }
+
+    return onCloudflareDomainUnlocked(url, () => {
+      setDismissed(true);
+      setWaitingUnlock(false);
+      if (!autoRetriedRef.current && onRetryRef.current) {
+        autoRetriedRef.current = true;
+        onRetryRef.current();
+      }
+    });
   }, [url, sourceName]);
 
   useEffect(() => {

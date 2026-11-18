@@ -429,7 +429,7 @@ export class UniversalParserEngine {
       const genresRaw = extractJsonField(res.json, cfg.fields.genres, source.baseUrl, source.vars);
       const altRaw = extractJsonField(res.json, cfg.fields.altTitles, source.baseUrl, source.vars);
       return {
-        title: title || 'Sans titre',
+        title: title || 'Untitled',
         url: mangaUrl,
         coverUrl:
           extractJsonField(res.json, cfg.fields.cover, source.baseUrl, source.vars) || undefined,
@@ -465,7 +465,7 @@ export class UniversalParserEngine {
     const altRaw = extractDomField(doc, cfg.fields.altTitles, source.baseUrl, res.finalUrl);
 
     return {
-      title: title || 'Sans titre',
+      title: title || 'Untitled',
       url: res.finalUrl || mangaUrl,
       coverUrl:
         extractDomField(doc, cfg.fields.cover, source.baseUrl, res.finalUrl) || undefined,

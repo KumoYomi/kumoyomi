@@ -1,51 +1,49 @@
-# KumoYomi Roadmap & Pending Improvements
+# KumoYomi Roadmap & Status
 
-This document tracks a complete, prioritized audit of everything remaining to polish KumoYomi, ready it for **Firefox Add-ons (AMO)** store publication, improve reliability/UX, and expand parser capabilities.
-
----
-
-## Priority 1 — Firefox Runtime Verification & AMO Store Readiness
-
-KumoYomi currently prioritizes **Firefox** before Chrome Web Store verification:
-
-### 1. Firefox Live End-to-End Runtime Testing
-Verify real desktop behavior on **Firefox (Release & Developer Edition)** across live edge cases:
-- [ ] **`cfPopup.ts` window & docking flow**: Test `browser.windows.create({ type: 'popup' })`, automatic polling detection once clearance cookies succeed, and inter-window `tabs.move` into a background pinned tab (and fallback behavior if Firefox rejects cross-window docking between `popup` and `normal` windows).
-- [ ] **`dnrRules.ts` on Firefox**: Confirm dynamic `modifyHeaders` rules using `initiatorDomains` match `moz-extension://<uuid>` cleanly on both main HTML fetches and anti-hotlink CDN image fetches.
-- [ ] **`tabProxy.ts` in `world: 'MAIN'`**: Confirm fallback `fetch(..., { credentials: 'include' })` from cleared open tabs works across subdomains in Firefox's Multi-Account Containers / Total Cookie Protection partitions.
-
-### 2. Firefox AMO Store Migration (`wxt.config.ts`)
-Currently `wxt.config.ts` declares blanket `host_permissions: ['http://*/*', 'https://*/*']` and placeholder `gecko.id: 'kumoyomi@local.extension'`. Before *Listed* submission on [addons.mozilla.org](https://addons.mozilla.org/developers/):
-- [ ] Replace blanket `host_permissions` with **`optional_host_permissions: ['http://*/*', 'https://*/*']`** (or dynamic origin grants).
-- [ ] Trigger `browser.permissions.request({ origins: [...] })` automatically when a user adds a repository URL, enables a source (`baseUrl`), or encounters an image CDN subdomain (`*.rootdomain/*`).
-- [ ] Register a permanent unique `browser_specific_settings.gecko.id` (matching the AMO listing) and keep `data_collection_permissions: { required: ['none'] }`.
-- [ ] Publish a public Privacy Policy URL (required by AMO reviewers even when zero data leaves the device) and include exact reproducible build instructions (`pnpm install --frozen-lockfile && pnpm build:firefox`) alongside the source archive.
+This document tracks implemented capabilities in **`v0.4.0`** alongside remaining external publishing steps and long-term items.
 
 ---
 
-## Priority 2 — Core Engine & UX Reliability Gaps
+## Priority 1 — Firefox Verification & AMO Store Readiness
 
-- [ ] **Inline Script JSON Extraction (`<script>` Hydration)**: Support extracting structured objects/arrays embedded in `<script>` tags (e.g., `window.__NEXT_DATA__`, `__NUXT__`, or `ts_reader.run(...)`) directly from HTML responses in [`ParserEngine`](../src/core/parser/engine.ts).
-- [ ] **Smart Auto-Deletion & Offline Hygiene**:
-  - Clean up offline chapter blobs when a user removes a standalone/manual source (currently `removeRepository` cascades cleanup, whereas single-source removal leaves offline blobs behind until cleared manually).
-  - Add an optional toggle in Settings: *"Automatically delete offline chapters once marked read"*.
-- [ ] **Desktop Chapter Notifications**: `entrypoints/background.ts` triggers `kumoyomi-check-updates` on an alarm and updates the toolbar badge count, but does not yet raise optional `browser.notifications` alerts when new unread chapters arrive.
-- [ ] **Per-Domain Pacing During Library Update Checks**: `checkLibraryUpdates()` ([`src/core/updater/updateChecker.ts`](../src/core/updater/updateChecker.ts)) iterates followed series sequentially; grouping and pacing consecutive checks per source hostname will significantly lower HTTP `429` / Cloudflare triggers.
-- [ ] **Live Selector & Endpoint Tester inside `SourcesPage`**: Today the `Test` button checks only Popular p.1. Adding an interactive panel showing extracted fields for Catalogue, Manga Details, Chapters, and Pages would dramatically speed up community source authoring.
-- [ ] **Automated Browser E2E Test Suite**: Add Playwright / web-ext smoke tests driving the built Firefox MV3 bundle against [`tools/mock-manga-servers.mjs`](../tools/mock-manga-servers.mjs) alongside the existing `vitest` unit suite.
+### 1. Firefox Runtime & Cloudflare Session Fixes
+- [x] **`dnrRules.ts` verified live on Firefox 160 MV3**: Verified end-to-end against `tools/mock-manga-servers.mjs` with strict HTTP `403` hotlink blocking enabled — MV3 `declarativeNetRequest` `Referer` injection loaded covers and Page 1 blob images cleanly (`760×1100`) with zero console errors.
+- [x] **Interactive & offline flow verified live on Firefox 160 MV3**: Repository import, 3-stage **Inspect** debugger, Explore, Library custom categories, IndexedDB offline chapter download & playback, and Reader `?` shortcuts modal all verified in headless Firefox 160 (`kumoyomi@kumoyomi.app`).
+- [x] **Cloudflare popup, tab-proxy & banner race hardened**:
+  - `cfPopup.ts` always performs a pre-flight check (`tabProxy` + direct probe) before opening a popup window, preserves verified domains in 1 deduplicated pinned background tab instead of closing via direct-fetch false positives, strengthens EN/FR Turnstile detection, and removes empty popup shells cleanly after `tabs.move`.
+  - `tabProxy.ts` automatically wakes sleeping/discarded pinned tabs (`browser.tabs.reload`) and retries transient `executeScript` errors while moving windows.
+  - `browserBridge.ts` + `cfAutoVerify.ts` + `CloudflareBanner.tsx` share a live domain unlock event bus (`notifyCloudflareDomainUnlocked` / `onCloudflareDomainUnlocked`) and automatic stabilization retry so banners disappear and retry immediately once unlocked, and `ExplorePage` parallel search wraps requests in `runWithAutoCloudflarePopup`.
+- [ ] **Real-world Turnstile / Cloudflare site spot-check**: User verification on live Cloudflare/Turnstile websites in a personal desktop Firefox profile (automated harnesses never solve CAPTCHAs).
+
+### 2. Firefox AMO Store Readiness (`wxt.config.ts`)
+- [x] **Optional host permissions build target (`build:firefox:amo`)**: `KUMOYOMI_AMO_LISTED=1` switches `wxt.config.ts` from blanket `host_permissions` to `optional_host_permissions: ['http://*/*', 'https://*/*']` (`kumoyomi-*-firefox-amo-listed.zip` built in CI).
+- [x] **User-gesture synchronous permission grants**: `AppShell.tsx` global permission prompt and `SourcesPage.tsx` per-repo / per-source requests invoke `browser.permissions.request` synchronously before any `await`, requesting exact origin + `*.rootdomain/*` CDN wildcards.
+- [x] **Production AMO metadata & Privacy Policy**: Updated `gecko.id` to `kumoyomi@kumoyomi.app` with `data_collection_permissions: { required: ['none'] }` and added [`PRIVACY.md`](../PRIVACY.md).
+- [ ] **AMO Developer Hub manual submission**: Upload `kumoyomi-<version>-firefox-amo-listed.zip` + source zip + `pnpm install --frozen-lockfile && pnpm build:firefox:amo` build note + public `PRIVACY.md` link on [addons.mozilla.org](https://addons.mozilla.org/developers/).
 
 ---
 
-## Priority 3 — Reader & Library Quality-of-Life Features
+## Priority 2 — Core Engine & UX Reliability
 
-- [ ] **Custom Library Categories / Shelves**: Allow users to organize series into custom tags or tabs beyond fixed reading statuses.
-- [ ] **Reader Keyboard Help Modal (`?`)**: Surface all navigation/zoom/fullscreen shortcuts in-app and add scroll-to-next-chapter transition triggers at chapter boundaries.
-- [ ] **Local Backup Options**: Optionally allow filtering backup export/restore by category or viewing last backup timestamp reminder.
-- [ ] **Reading Statistics & External Trackers**: Local reading stats (chapters read, time/streak) and optional opt-in OAuth sync to AniList / MyAnimeList / Kitsu.
-- [ ] **Canvas Image Descrambling (Long-Term)**: Optional parameterized descrambling transforms for sources that slice/shuffle pages inside canvas buffers.
+- [x] **Inline `<script>` JSON Extraction (`__NEXT_DATA__`, `ts_reader.run`)**: `request.scriptJson` (`selector` / `regex`) implemented in [`httpClient.ts`](../src/core/parser/httpClient.ts), tested in Vitest and integrated with `isSameSourceRequest` single-fetch cache reuse.
+- [x] **Offline Hygiene & Auto-Deletion**: Added `removeSource()` cascade offline cleanup ([`repositoryService.ts`](../src/core/parser/repositoryService.ts)) plus `autoDeleteOfflineOnRead` setting wired into manual read marking and Reader chapter exit.
+- [x] **Desktop Chapter Notifications**: Added `notifications` permission, localized `browser.notifications` alert on background updates in [`background.ts`](../entrypoints/background.ts) (opens `#/updates` on click), and Settings toggle.
+- [x] **Per-Domain Pacing & CF Short-Circuit in `updateChecker.ts`**: [`checkLibraryUpdates()`](../src/core/updater/updateChecker.ts) round-robins across sources, paces consecutive same-host calls (`minHostIntervalMs: 650`), and short-circuits duplicate requests when a source returns `CloudflareChallengeError`.
+- [x] **Interactive Source Inspector in `SourcesPage`**: Live 3-stage debugger (Catalogue/Search -> Details & Chapters -> Pages + live Page 1 anti-hotlink preview) with latency readout.
+- [ ] **Automated CI Browser E2E Suite**: Wire a headless Playwright / BiDi smoke script into GitHub Actions (unit tests in `tests/parser.test.ts` currently run in CI).
+
+---
+
+## Priority 3 — Reader, Library & Backups
+
+- [x] **Custom Library Categories**: Create/delete categories and filter series in [`LibraryPage`](../src/features/library/LibraryPage.tsx) and toggle category assignments in [`MangaDetailPage`](../src/features/manga-detail/MangaDetailPage.tsx).
+- [x] **Reader Keyboard Help Modal (`?`)**: Press `?` / `H` or click `?` in the top bar for a modal listing all keyboard shortcuts and mouse click zones.
+- [x] **Local Reading Statistics**: 4-card summary (followed series, chapters read, history entries, offline chapters) in [`UpdatesPage`](../src/features/updates/UpdatesPage.tsx).
+- [ ] **External Trackers (AniList / MyAnimeList / Kitsu)**: Optional opt-in OAuth sync (future).
+- [ ] **Canvas Image Descrambling (Long-Term)**: Optional parameterized descrambling transforms for canvas-shuffled pages.
 
 ---
 
 ## Priority 4 — Cross-Browser Polish (Later)
 
-- [ ] **Chrome / Chromium Re-Verification**: Once Firefox runtime tests, AMO permission UX, and UX polish are settled, perform full verification on Chrome / Brave / Edge against the `pnpm build` bundle and decide between local sideload distribution or Chrome Web Store compliance.
+- [ ] **Chrome / Chromium Verification**: Re-verify Chromium MV3 bundle (`pnpm build`) across DevTools / Chrome Web Store requirements once Firefox AMO listing is published.

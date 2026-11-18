@@ -9,26 +9,32 @@ import {
   syncSourceDnrRules,
 } from '@/src/core/extension/dnrRules';
 import { proxyFetchInOpenTab } from '@/src/core/extension/tabProxy';
+import { translate } from '@/src/core/i18n';
 import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
 
 const UPDATE_ALARM_NAME = 'kumoyomi-check-updates';
+const NEW_CHAPTERS_NOTIF_ID = 'kumoyomi-new-chapters';
 
-async function openOrFocusAppTab(): Promise<void> {
+async function openOrFocusAppTab(hash = ''): Promise<void> {
   const appUrl = browser.runtime.getURL('/app.html');
+  const targetUrl = hash ? `${appUrl}${hash}` : appUrl;
   try {
     const tabs = await browser.tabs.query({});
     const existing = tabs.find((t) => t.url?.startsWith(appUrl));
     if (existing?.id !== undefined) {
-      await browser.tabs.update(existing.id, { active: true });
+      await browser.tabs.update(existing.id, {
+        active: true,
+        ...(hash ? { url: targetUrl } : {}),
+      });
       if (existing.windowId !== undefined) {
         await browser.windows.update(existing.windowId, { focused: true });
       }
       return;
     }
   } catch {
-    // Repli sur l'ouverture d'un nouvel onglet
+    // Fallback to creating a new tab
   }
-  await browser.tabs.create({ url: appUrl, active: true });
+  await browser.tabs.create({ url: targetUrl, active: true });
 }
 
 async function updateBadgeCount(count: number): Promise<void> {
@@ -52,12 +58,18 @@ async function syncStoredSourcesDnr(): Promise<void> {
     const sources = await db.sources.toArray();
     await syncSourceDnrRules(sources.filter((s) => s.enabled).map((s) => ({ baseUrl: s.baseUrl })));
   } catch (err) {
-    console.warn('[KumoYomi Background] Impossible de synchroniser les règles DNR:', err);
+    console.warn('[KumoYomi Background] Unable to sync DNR rules:', err);
   }
 }
 
 export default defineBackground(() => {
   registerInProcessTabProxyHandler(proxyFetchInOpenTab);
+
+  browser.notifications?.onClicked?.addListener((notificationId) => {
+    if (notificationId === NEW_CHAPTERS_NOTIF_ID) {
+      void openOrFocusAppTab('#/updates');
+    }
+  });
 
   browser.runtime.onInstalled.addListener((details) => {
     void (async () => {
@@ -84,11 +96,28 @@ export default defineBackground(() => {
     if (alarm.name !== UPDATE_ALARM_NAME) return;
     void (async () => {
       try {
-        await checkLibraryUpdates();
+        const summary = await checkLibraryUpdates();
         const totalNew = await db.chapters.filter((c) => c.isNew && !c.read).count();
         await updateBadgeCount(totalNew);
+
+        if (summary.newChaptersCount > 0 && browser.notifications?.create) {
+          const settings = await getOrCreateSettings();
+          if (settings.desktopNotifications !== false) {
+            const locale = settings.language ?? 'en';
+            await browser.notifications
+              .create(NEW_CHAPTERS_NOTIF_ID, {
+                type: 'basic',
+                iconUrl: browser.runtime.getURL('/icon/128.png'),
+                title: translate(locale, 'notifications.newChaptersTitle'),
+                message: translate(locale, 'notifications.newChaptersBody', {
+                  count: summary.newChaptersCount,
+                }),
+              })
+              .catch(() => {});
+          }
+        }
       } catch (err) {
-        console.warn('[KumoYomi Background] Vérification des mises à jour échouée:', err);
+        console.warn('[KumoYomi Background] Update check failed:', err);
       }
     })();
   });
@@ -136,8 +165,8 @@ export default defineBackground(() => {
         }
       }
     })().catch((err) => {
-      console.error('[KumoYomi Background] Erreur handler message:', err);
-      sendResponse({ ok: false, error: err instanceof Error ? err.message : 'Erreur' });
+      console.error('[KumoYomi Background] Message handler error:', err);
+      sendResponse({ ok: false, error: err instanceof Error ? err.message : 'Error' });
     });
 
     return true;

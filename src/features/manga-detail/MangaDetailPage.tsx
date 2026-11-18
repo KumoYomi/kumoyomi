@@ -13,18 +13,22 @@ import {
   Layers,
   Loader2,
   Play,
+  Plus,
   RefreshCw,
   Search,
+  Tag,
   Trash2,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
-import { db, normalizeMangaKey } from '@/src/core/db/db';
+import { DEFAULT_APP_SETTINGS, db, normalizeMangaKey } from '@/src/core/db/db';
 import {
+  addCustomCategory,
   markChaptersReadState,
   saveMangaDetails,
+  setMangaCategories,
   setPreferredSource,
   syncSourceChapters,
   toggleFavoriteManga,
@@ -56,6 +60,9 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
     useLiveQuery(() => db.mangaSources.where('mangaId').equals(mangaId).toArray(), [mangaId], []) ??
     [];
   const allSources = useLiveQuery(() => db.sources.toArray(), [], []) ?? [];
+  const settings = useLiveQuery(() => db.settings.get('default'), [], DEFAULT_APP_SETTINGS);
+  const customCategories = settings?.customCategories ?? [];
+  const [newCatInput, setNewCatInput] = useState('');
 
   const activeSourceId =
     manga?.preferredSourceId && links.some((l) => l.sourceId === manga.preferredSourceId)
@@ -136,7 +143,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
       } else {
         setSyncError({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Erreur lors du chargement des chapitres.',
+          message: err instanceof Error ? err.message : t('manga.loadChaptersError'),
         });
       }
     } finally {
@@ -170,7 +177,7 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
         setSyncError({ kind: 'cloudflare', url: err.url, probeUrl: err.requestUrl });
       } else {
         setDownloadError(
-          err instanceof Error ? err.message : 'Échec du téléchargement hors-ligne.',
+          err instanceof Error ? err.message : t('manga.downloadFailed'),
         );
       }
     } finally {
@@ -392,6 +399,70 @@ export function MangaDetailPage({ mangaId }: { mangaId: string }) {
                 </select>
               )}
             </div>
+
+            {manga.favorite && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-400">
+                  <Tag className="h-3.5 w-3.5 text-rose-400" />
+                  {t('categories.label')}:
+                </span>
+                {customCategories.map((cat) => {
+                  const activeCats = manga.categories ?? [];
+                  const assigned = activeCats.some(
+                    (c) => c.toLowerCase() === cat.toLowerCase(),
+                  );
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => {
+                        const next = assigned
+                          ? activeCats.filter((c) => c.toLowerCase() !== cat.toLowerCase())
+                          : [...activeCats, cat];
+                        void setMangaCategories(manga.id, next);
+                      }}
+                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                        assigned
+                          ? 'border-rose-500/50 bg-rose-500/15 text-rose-200'
+                          : 'border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+                <form
+                  onSubmit={(e: FormEvent) => {
+                    e.preventDefault();
+                    const trimmed = newCatInput.trim();
+                    if (!trimmed) return;
+                    setNewCatInput('');
+                    void (async () => {
+                      await addCustomCategory(trimmed);
+                      await setMangaCategories(manga.id, [...(manga.categories ?? []), trimmed]);
+                    })();
+                  }}
+                  className="inline-flex items-center gap-1"
+                >
+                  <input
+                    type="text"
+                    value={newCatInput}
+                    onChange={(e) => setNewCatInput(e.target.value)}
+                    placeholder={t('categories.newPlaceholder')}
+                    className="w-36 rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!newCatInput.trim()}
+                    title={t('categories.addBtn')}
+                    className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    <Plus className="h-3 w-3" />
+                    {t('categories.addBtn')}
+                  </button>
+                </form>
+              </div>
+            )}
 
             {/* Menu déroulant changement de source */}
             <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-950/70 p-3">

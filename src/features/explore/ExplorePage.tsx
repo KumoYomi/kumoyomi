@@ -99,7 +99,9 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
     await Promise.all(
       enabledSources.map(async (src) => {
         try {
-          const res = await parserEngine.search(src.resolvedConfig, trimmed, 1);
+          const res = await runWithAutoCloudflarePopup(() =>
+            parserEngine.search(src.resolvedConfig, trimmed, 1),
+          );
           if (searchRunId.current !== runId) return;
           setSearchStates((prev) => ({
             ...prev,
@@ -129,7 +131,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
                 source: src,
                 status: 'error',
                 items: [],
-                errorMessage: err instanceof Error ? err.message : 'Erreur réseau',
+                errorMessage: err instanceof Error ? err.message : t('explore.networkError'),
               },
             }));
           }
@@ -171,7 +173,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
             source: src,
             status: 'error',
             items: [],
-            errorMessage: err instanceof Error ? err.message : 'Erreur réseau',
+            errorMessage: err instanceof Error ? err.message : t('explore.networkError'),
           },
         }));
       }
@@ -201,7 +203,7 @@ export function ExplorePage({ initialSourceId, initialQuery }: ExplorePageProps)
       } else {
         setBrowseError({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Erreur de chargement du catalogue',
+          message: err instanceof Error ? err.message : t('explore.catalogueError'),
         });
       }
     } finally {

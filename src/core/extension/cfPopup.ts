@@ -3,7 +3,9 @@ import {
   type CloudflarePopupResult,
   getSiteRootDomain,
   markSiteTabProxied,
+  notifyCloudflareDomainUnlocked,
   openExternalTab,
+  requestTabProxyFetch,
 } from '@/src/core/extension/browserBridge';
 import { looksLikeChallengeTitle } from '@/src/core/extension/tabProxy';
 import { isCloudflareResponse } from '@/src/core/parser/httpClient';
@@ -47,6 +49,9 @@ async function passiveChallengeCheckInTab(probeUrl: string): Promise<{ unlocked:
   const titleBlocked =
     title.includes('just a moment') ||
     title.includes('un instant') ||
+    title.includes('instant') ||
+    title.includes('vérification') ||
+    title.includes('patientez') ||
     title.includes('attention required') ||
     title.includes('checking your browser') ||
     title.includes('ddos-guard');
@@ -55,8 +60,15 @@ async function passiveChallengeCheckInTab(probeUrl: string): Promise<{ unlocked:
   }
 
   const challengeSelector =
-    '#challenge-running, #challenge-stage, #cf-challenge-running, form#challenge-form, .cf-browser-verification';
+    '#challenge-running, #challenge-stage, #cf-challenge-running, form#challenge-form, .cf-browser-verification, iframe[src*="challenges.cloudflare.com"]';
   if (document.querySelector(challengeSelector)) {
+    return { unlocked: false };
+  }
+
+  const turnstileInput = document.querySelector<HTMLInputElement>(
+    'input[name="cf-turnstile-response"]',
+  );
+  if (turnstileInput && !turnstileInput.value) {
     return { unlocked: false };
   }
 
@@ -64,7 +76,10 @@ async function passiveChallengeCheckInTab(probeUrl: string): Promise<{ unlocked:
   if (
     bodyLower.includes('enable javascript and cookies to continue') ||
     bodyLower.includes('checking if the site connection is secure') ||
-    bodyLower.includes('verify you are human')
+    bodyLower.includes('verify you are human') ||
+    bodyLower.includes('vérifiez que vous êtes humain') ||
+    bodyLower.includes('vérification de la sécurité de votre connexion') ||
+    bodyLower.includes('activez javascript et les cookies')
   ) {
     return { unlocked: false };
   }
@@ -81,20 +96,25 @@ async function passiveChallengeCheckInTab(probeUrl: string): Promise<{ unlocked:
       if (res.headers.get('cf-mitigated')?.toLowerCase() === 'challenge') {
         return false;
       }
-      if (res.status === 403 || res.status === 503 || res.status === 429) {
+      const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+      if (
+        res.status === 403 ||
+        res.status === 503 ||
+        res.status === 429 ||
+        contentType.includes('text/html')
+      ) {
         const text = (await res.text()).toLowerCase();
         if (
-          text.includes('<title>just a moment...</title>') ||
-          text.includes('<title>un instant...</title>') ||
+          text.includes('<title>just a moment') ||
+          text.includes('<title>un instant') ||
           text.includes('challenges.cloudflare.com') ||
           text.includes('/cdn-cgi/challenge-platform/') ||
           text.includes('_cf_chl_opt')
         ) {
           return false;
         }
-        return false;
       }
-      return true;
+      return res.status < 500 && res.status !== 403 && res.status !== 429;
     } catch {
       return false;
     } finally {
@@ -149,11 +169,73 @@ async function focusCallerContext(callerWindowId?: number, callerTabId?: number)
   }
 }
 
+async function checkAlreadyUnlockedBeforePopup(
+  siteUrl: string,
+  probeTarget: string,
+  root: string,
+): Promise<CloudflarePopupResult | null> {
+  try {
+    let fallbackOrigin: string | undefined;
+    try {
+      fallbackOrigin = new URL(siteUrl).origin;
+    } catch {
+      fallbackOrigin = undefined;
+    }
+    const tabCheck = await requestTabProxyFetch({
+      url: probeTarget,
+      method: 'GET',
+      timeoutMs: 4500,
+      fallbackTabOrigin: fallbackOrigin,
+    }).catch(() => undefined);
+
+    if (tabCheck?.foundTab && !tabCheck.error) {
+      const status = tabCheck.status ?? 0;
+      const headers = new Headers(tabCheck.headers ?? {});
+      const bodyLower = (tabCheck.bodyText ?? '').toLowerCase();
+      const isHtml = (headers.get('content-type') ?? '').toLowerCase().includes('text/html');
+      const hasChallengeHtml = isHtml && bodyLower.includes('challenges.cloudflare.com');
+      if (
+        status > 0 &&
+        status !== 403 &&
+        status !== 503 &&
+        status !== 429 &&
+        !hasChallengeHtml &&
+        !isCloudflareResponse(status, headers, tabCheck.bodyText ?? '')
+      ) {
+        markSiteTabProxied(probeTarget);
+        markSiteTabProxied(siteUrl);
+        cancelledUntilByDomain.delete(root);
+        notifyCloudflareDomainUnlocked(siteUrl);
+        return { unlocked: true, mode: 'pinned_tab' };
+      }
+    }
+
+    const probeDirect = await canExtensionFetchDirectly(probeTarget);
+    if (probeDirect) {
+      const siteDirect =
+        probeTarget === siteUrl ? true : await canExtensionFetchDirectly(siteUrl);
+      if (siteDirect) {
+        cancelledUntilByDomain.delete(root);
+        notifyCloudflareDomainUnlocked(siteUrl);
+        return { unlocked: true, mode: 'direct' };
+      }
+    }
+  } catch {
+    // Fall through to opening popup window
+  }
+  return null;
+}
+
 async function runPopupVerificationFlow(
   siteUrl: string,
   probeTarget: string,
   root: string,
 ): Promise<CloudflarePopupResult> {
+  const preflight = await checkAlreadyUnlockedBeforePopup(siteUrl, probeTarget, root);
+  if (preflight) {
+    return preflight;
+  }
+
   if (!browser.windows?.create || !browser.tabs?.query || !browser.scripting?.executeScript) {
     await openExternalTab(siteUrl);
     return { unlocked: false, mode: 'external_tab' };
@@ -239,21 +321,12 @@ async function runPopupVerificationFlow(
         const probe = results[0]?.result as { unlocked?: boolean } | undefined;
         if (!probe?.unlocked) return;
 
-        // Laisse une courte marge au cas où Cloudflare enchaîne un redirect juste après validation
+        // Allow brief settle time in case Cloudflare chains a post-verification redirect
         await new Promise((r) => setTimeout(r, 350));
         if (settled) return;
 
-        const directWorks = await canExtensionFetchDirectly(probeTarget);
-        if (directWorks) {
-          cancelledUntilByDomain.delete(root);
-          await browser.windows.remove(popupWinId).catch(() => {});
-          await focusCallerContext(callerWindowId, callerTabId);
-          finish({ unlocked: true, mode: 'direct' });
-          return;
-        }
-
-        // Cookies partitionnés / Sec-Fetch-Site : le proxy via onglet reste requis.
-        // Déplacer l'onglet débloqué en onglet épinglé inactif ferme automatiquement la popup et garde KumoYomi au premier plan.
+        // Always keep 1 silent pinned tab on the verified domain so partitioned cookies,
+        // POST endpoints, and CDN subdomains stay unlocked without losing clearance.
         markSiteTabProxied(probeTarget);
         markSiteTabProxied(siteUrl);
         cancelledUntilByDomain.delete(root);
@@ -269,18 +342,49 @@ async function runPopupVerificationFlow(
 
         if (targetDockWindowId !== undefined) {
           try {
+            const allTabs = await browser.tabs.query({}).catch(() => []);
+            const stalePinnedIds = allTabs
+              .filter(
+                (t) =>
+                  t.id !== undefined &&
+                  t.id !== popupTabId &&
+                  t.pinned &&
+                  t.url &&
+                  rootDomainOf(t.url) === root,
+              )
+              .map((t) => t.id!);
+
             await browser.tabs.move(popupTabId, { windowId: targetDockWindowId, index: -1 });
             await browser.tabs.update(popupTabId, { pinned: true, active: false });
+            if (stalePinnedIds.length > 0) {
+              await browser.tabs.remove(stalePinnedIds).catch(() => {});
+            }
+
+            const remaining = await browser.tabs.query({ windowId: popupWinId }).catch(() => []);
+            if (remaining.length === 0) {
+              await browser.windows.remove(popupWinId).catch(() => {});
+            }
+
+            // Wait up to 300ms for the docked tab to report status === 'complete'
+            const settleDeadline = Date.now() + 300;
+            while (Date.now() < settleDeadline) {
+              const info = await browser.tabs.get(popupTabId).catch(() => null);
+              if (!info || info.status === 'complete') break;
+              await new Promise((r) => setTimeout(r, 75));
+            }
+
             await focusCallerContext(callerWindowId ?? targetDockWindowId, callerTabId);
+            notifyCloudflareDomainUnlocked(siteUrl);
             finish({ unlocked: true, mode: 'pinned_tab' });
             return;
           } catch {
-            // Repli ci-dessous si le déplacement inter-fenêtres échoue
+            // Fallback below if cross-window docking fails
           }
         }
 
         await browser.windows.update(popupWinId, { state: 'minimized' }).catch(() => {});
         await focusCallerContext(callerWindowId, callerTabId);
+        notifyCloudflareDomainUnlocked(siteUrl);
         finish({ unlocked: true, mode: 'minimized' });
       } finally {
         checking = false;

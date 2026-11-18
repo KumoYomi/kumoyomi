@@ -1,10 +1,11 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { BookMarked, Compass, Loader2, Play, RefreshCw, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { BookMarked, Compass, Loader2, Play, Plus, RefreshCw, Search, Tag, X } from 'lucide-react';
+import { type FormEvent, useMemo, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { UpdateCheckStatusBanner } from '@/src/components/UpdateCheckStatusBanner';
-import { db } from '@/src/core/db/db';
+import { DEFAULT_APP_SETTINGS, db } from '@/src/core/db/db';
+import { addCustomCategory, removeCustomCategory } from '@/src/core/db/mangaRepository';
 import type { UpdateCheckSummary } from '@/src/core/extension/browserBridge';
 import { INTL_LOCALE_TAG, useTranslation } from '@/src/core/i18n';
 import type { LibraryStatus, MangaEntity } from '@/src/core/types/manga';
@@ -36,8 +37,12 @@ export function LibraryPage() {
 
   const allSources = useLiveQuery(() => db.sources.toArray(), [], []) ?? [];
   const sourceById = useMemo(() => new Map(allSources.map((s) => [s.id, s])), [allSources]);
+  const settings = useLiveQuery(() => db.settings.get('default'), [], DEFAULT_APP_SETTINGS);
+  const customCategories = settings?.customCategories ?? [];
 
   const [statusFilter, setStatusFilter] = useState<'all' | LibraryStatus>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<LibrarySortKey>('updated');
   const [titleQuery, setTitleQuery] = useState('');
@@ -60,6 +65,13 @@ export function LibraryPage() {
   const visibleMangas = useMemo(() => {
     const filtered = favorites.filter((m) => {
       if (statusFilter !== 'all' && m.libraryStatus !== statusFilter) return false;
+      if (categoryFilter === '__uncategorized__') {
+        if (m.categories && m.categories.length > 0) return false;
+      } else if (categoryFilter !== 'all') {
+        if (!m.categories?.some((c) => c.toLowerCase() === categoryFilter.toLowerCase())) {
+          return false;
+        }
+      }
       if (sourceFilter !== 'all' && m.preferredSourceId !== sourceFilter) return false;
       if (titleQuery.trim()) {
         const q = titleQuery.trim().toLowerCase();
@@ -77,7 +89,7 @@ export function LibraryPage() {
       if (sortBy === 'added') return b.addedAt - a.addedAt;
       return b.updatedAt - a.updatedAt;
     });
-  }, [favorites, statusFilter, sourceFilter, sortBy, titleQuery, locale]);
+  }, [favorites, statusFilter, categoryFilter, sourceFilter, sortBy, titleQuery, locale]);
 
   async function handleQuickReadManga(manga: MangaEntity) {
     const sourceId = manga.preferredSourceId;
@@ -206,6 +218,90 @@ export function LibraryPage() {
             </button>
           );
         })}
+      </div>
+
+      {/* Custom categories bar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+          <Tag className="h-3.5 w-3.5" />
+          {t('categories.label')}:
+        </span>
+        <button
+          type="button"
+          onClick={() => setCategoryFilter('all')}
+          className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+            categoryFilter === 'all'
+              ? 'bg-zinc-800 text-white'
+              : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+          }`}
+        >
+          {t('categories.all')}
+        </button>
+        {customCategories.map((cat) => (
+          <div
+            key={cat}
+            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-xs font-medium transition ${
+              categoryFilter === cat
+                ? 'border-rose-500/40 bg-rose-500/15 text-rose-200'
+                : 'border-zinc-800 bg-[#12121a] text-zinc-300'
+            }`}
+          >
+            <button type="button" onClick={() => setCategoryFilter(cat)} className="px-0.5">
+              {cat}
+            </button>
+            <button
+              type="button"
+              title={t('categories.removeTooltip', { name: cat })}
+              aria-label={t('categories.removeTooltip', { name: cat })}
+              onClick={() => {
+                if (categoryFilter === cat) setCategoryFilter('all');
+                void removeCustomCategory(cat);
+              }}
+              className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-rose-300"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ))}
+        {customCategories.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setCategoryFilter('__uncategorized__')}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+              categoryFilter === '__uncategorized__'
+                ? 'bg-zinc-800 text-white'
+                : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+            }`}
+          >
+            {t('categories.uncategorized')}
+          </button>
+        )}
+        <form
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            if (!newCategoryName.trim()) return;
+            const val = newCategoryName.trim();
+            setNewCategoryName('');
+            void addCustomCategory(val);
+          }}
+          className="inline-flex items-center gap-1"
+        >
+          <input
+            type="text"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+            placeholder={t('categories.newPlaceholder')}
+            className="w-36 rounded-lg border border-zinc-800 bg-[#12121a] px-2.5 py-1 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-rose-500/60 focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={!newCategoryName.trim()}
+            className="inline-flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+          >
+            <Plus className="h-3 w-3" />
+            {t('categories.addBtn')}
+          </button>
+        </form>
       </div>
 
       <UpdateCheckStatusBanner

@@ -1,5 +1,16 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { Bell, CheckCheck, Clock, Loader2, Play, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  Bell,
+  BookMarked,
+  BookOpenCheck,
+  CheckCheck,
+  Clock,
+  HardDrive,
+  Loader2,
+  Play,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
@@ -47,6 +58,10 @@ export function UpdatesPage() {
 
   const mangas = useLiveQuery(() => db.mangas.toArray(), [], []) ?? [];
   const sources = useLiveQuery(() => db.sources.toArray(), [], []) ?? [];
+  const readChaptersCount = useLiveQuery(() => db.chapters.filter((c) => c.read).count(), [], 0) ?? 0;
+  const totalHistoryCount = useLiveQuery(() => db.history.count(), [], 0) ?? 0;
+  const offlineCount = useLiveQuery(() => db.offlineChapters.count(), [], 0) ?? 0;
+  const followedCount = useMemo(() => mangas.filter((m) => m.favorite).length, [mangas]);
 
   const mangaMap = useMemo(() => new Map(mangas.map((m) => [m.id, m])), [mangas]);
   const sourceMap = useMemo(() => new Map(sources.map((s) => [s.id, s])), [sources]);
@@ -100,6 +115,38 @@ export function UpdatesPage() {
         sourceById={sourceMap}
         onRetry={() => void handleCheckUpdates()}
       />
+
+      {/* Local reading statistics */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <BookMarked className="h-3.5 w-3.5 text-rose-400" />
+            <span>{t('stats.followedSeries')}</span>
+          </div>
+          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{followedCount}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <BookOpenCheck className="h-3.5 w-3.5 text-emerald-400" />
+            <span>{t('stats.chaptersRead')}</span>
+          </div>
+          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{readChaptersCount}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <Clock className="h-3.5 w-3.5 text-indigo-400" />
+            <span>{t('stats.historyEntries')}</span>
+          </div>
+          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{totalHistoryCount}</p>
+        </div>
+        <div className="rounded-2xl border border-zinc-800/80 bg-[#12121a] p-4">
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <HardDrive className="h-3.5 w-3.5 text-amber-400" />
+            <span>{t('stats.offlineChapters')}</span>
+          </div>
+          <p className="mt-1.5 text-2xl font-bold tabular-nums text-white">{offlineCount}</p>
+        </div>
+      </section>
 
       {/* Historique de lecture */}
       <section className="space-y-4">

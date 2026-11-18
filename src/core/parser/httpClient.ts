@@ -3,9 +3,14 @@ import {
   clearSiteTabProxied,
   isSiteTabProxied,
   markSiteTabProxied,
+  notifyCloudflareDomainUnlocked,
   requestTabProxyFetch,
 } from '@/src/core/extension/browserBridge';
-import type { RequestConfig, SourceConfig } from '@/src/core/types/source';
+import type {
+  RequestConfig,
+  ScriptJsonExtractionConfig,
+  SourceConfig,
+} from '@/src/core/types/source';
 
 export class CloudflareChallengeError extends Error {
   readonly sourceId: string;
@@ -284,6 +289,7 @@ async function executeTimedFetch(
         throwCloudflareError(source, proxied.response.status, 'tab_blocked', url);
       }
       markSiteTabProxied(url);
+      notifyCloudflareDomainUnlocked(url);
       return proxied;
     }
     clearSiteTabProxied(url);
@@ -326,6 +332,7 @@ async function executeTimedFetch(
     const proxied = await fetchViaOpenTabWithRetry(url, init, source, timeoutMs);
     if (proxied && !isCloudflareResponse(proxied.response.status, proxied.response.headers, proxied.text)) {
       markSiteTabProxied(url);
+      notifyCloudflareDomainUnlocked(url);
       return proxied;
     }
     throwCloudflareError(
@@ -411,7 +418,8 @@ function prepareSourceRequest(
     .join('\n');
   const url = urlObj.toString();
   const responseType = reqConfig.responseType ?? 'html';
-  const cacheKey = `${method} ${url}\n${serializedHeaders}\n${body ?? ''}`;
+  const scriptKey = JSON.stringify(reqConfig.scriptJson ?? null);
+  const cacheKey = `${method} ${url}\n${serializedHeaders}\n${body ?? ''}\n${scriptKey}`;
 
   return {
     url,
@@ -435,6 +443,43 @@ export function isSameSourceRequest(
   } catch {
     return false;
   }
+}
+
+export function extractJsonFromHtmlScript(
+  html: string,
+  cfg: ScriptJsonExtractionConfig,
+  sourceName: string,
+): unknown {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const scripts = cfg.selector
+    ? Array.from(doc.querySelectorAll(cfg.selector))
+    : Array.from(doc.querySelectorAll('script'));
+  const re = cfg.regex ? new RegExp(cfg.regex) : null;
+
+  for (const scriptEl of scripts) {
+    const rawScript = (scriptEl.textContent ?? '').trim();
+    if (!rawScript) continue;
+
+    if (re) {
+      const match = re.exec(rawScript);
+      if (!match) continue;
+      const candidate = (match[1] ?? match[0] ?? '').trim();
+      if (!candidate) continue;
+      try {
+        return JSON.parse(candidate);
+      } catch {
+        continue;
+      }
+    }
+
+    try {
+      return JSON.parse(rawScript);
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(`Unable to extract embedded script JSON from ${sourceName}.`);
 }
 
 export async function fetchSourceResponse(
@@ -484,10 +529,14 @@ export async function fetchSourceResponse(
 
   let json: unknown = undefined;
   if (responseType === 'json' || responseType === 'json-html') {
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new Error(`Invalid JSON response received from ${source.name}.`);
+    if (reqConfig.scriptJson) {
+      json = extractJsonFromHtmlScript(text, reqConfig.scriptJson, source.name);
+    } else {
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error(`Invalid JSON response received from ${source.name}.`);
+      }
     }
   }
 

@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version à publier (ex: 0.2.0). Laisser vide pour utiliser package.json'
+        description: 'Version to publish (e.g. 0.4.0). Leave empty to use package.json'
         required: false
         default: ''
       prerelease:
-        description: 'Marquer comme pré-version (Pre-release)'
+        description: 'Mark as Pre-release'
         type: boolean
         required: false
         default: false
@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Résoudre la version et le tag
+      - name: Resolve version and tag
         id: meta
         shell: bash
         run: |
@@ -60,7 +60,7 @@ jobs:
             fi
           fi
 
-          # Met à jour temporairement la version du manifeste pour cette release si différente
+          # Temporarily align manifest versions if overridden via workflow input/tag
           if [ "$VERSION" != "$PKG_VERSION" ]; then
             node -e "
               const fs = require('fs');
@@ -78,42 +78,48 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Vérifier les types et les tests
+      - name: Typecheck and unit tests
         run: |
           pnpm typecheck
           pnpm test
 
-      - name: Construire les archives Chrome & Firefox MV3
-        run: pnpm zip
+      - name: Build Chrome, Firefox & Firefox AMO Listed MV3 archives
+        run: |
+          KUMOYOMI_AMO_LISTED=1 pnpm exec wxt zip -b firefox
+          AMO_RAW=$(ls .output/*-firefox.zip | head -n 1)
+          mv "$AMO_RAW" ".output/kumoyomi-${{ steps.meta.outputs.version }}-firefox-amo-listed.zip"
+          pnpm zip
 
-      - name: Publier la GitHub Release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           CHROME_ZIP=$(ls .output/*-chrome.zip | head -n 1)
           FIREFOX_ZIP=$(ls .output/*-firefox.zip | head -n 1)
+          AMO_ZIP=".output/kumoyomi-${{ steps.meta.outputs.version }}-firefox-amo-listed.zip"
           PRE_FLAG=""
           if [ "${{ github.event.inputs.prerelease }}" = "true" ]; then
             PRE_FLAG="--prerelease"
           fi
 
-          cat << 'EOF' > /tmp/release-notes.md
-          ## KumoYomi ${{ steps.meta.outputs.tag }}
-
-          ### Quick Installation
-          - **Firefox (Desktop):** download `*-firefox.zip`, open `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** and select the `.zip` archive (or extracted `manifest.json`). *(Use AMO signing for permanent installation on Firefox Release.)*
-          - **Chrome / Brave / Edge:** download `*-chrome.zip`, extract it, open `chrome://extensions`, enable **Developer mode**, and click **Load unpacked**.
-
-          ### Add the Community Sources Repository
-          In KumoYomi → **Sources & Repos**, paste:
-          `https://github.com/KumoYomi-Sources/extensions-source`
-          EOF
+          printf '%s\n' \
+            "## KumoYomi ${{ steps.meta.outputs.tag }}" \
+            "" \
+            "### Quick Installation" \
+            "- **Firefox (Desktop — standard / temporary / unlisted):** download \`*-firefox.zip\`, open \`about:debugging#/runtime/this-firefox\` → **Load Temporary Add-on…** and select the \`.zip\` archive (or extracted \`manifest.json\`)." \
+            "- **Firefox Add-ons (AMO Listed archive):** \`*-firefox-amo-listed.zip\` replaces blanket host permissions with \`optional_host_permissions\`." \
+            "- **Chrome / Brave / Edge:** download \`*-chrome.zip\`, extract it, open \`chrome://extensions\`, enable **Developer mode**, and click **Load unpacked**." \
+            "" \
+            "### Add the Community Sources Repository" \
+            "In KumoYomi → **Sources & Repos**, paste:" \
+            "\`https://github.com/KumoYomi-Sources/extensions-source\`" \
+            > /tmp/release-notes.md
 
           if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
-            gh release upload "${{ steps.meta.outputs.tag }}" "$CHROME_ZIP" "$FIREFOX_ZIP" --clobber
+            gh release upload "${{ steps.meta.outputs.tag }}" "$CHROME_ZIP" "$FIREFOX_ZIP" "$AMO_ZIP" --clobber
           else
             gh release create "${{ steps.meta.outputs.tag }}" \
-              "$CHROME_ZIP" "$FIREFOX_ZIP" \
+              "$CHROME_ZIP" "$FIREFOX_ZIP" "$AMO_ZIP" \
               --title "KumoYomi ${{ steps.meta.outputs.tag }}" \
               --notes-file /tmp/release-notes.md \
               $PRE_FLAG

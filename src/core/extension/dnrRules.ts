@@ -33,12 +33,16 @@ async function applySessionRules(removeRuleIds: number[], addRules: DnrRule[]): 
       addRules,
     });
   } catch (err) {
-    console.warn('[KumoYomi DNR] Échec updateSessionRules, repli sur updateDynamicRules:', err);
+    console.warn('[KumoYomi DNR] updateSessionRules failed, falling back to updateDynamicRules:', err);
     if (browser.declarativeNetRequest.updateDynamicRules) {
-      await browser.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds,
-        addRules,
-      });
+      try {
+        await browser.declarativeNetRequest.updateDynamicRules({
+          removeRuleIds,
+          addRules,
+        });
+      } catch (dynErr) {
+        console.warn('[KumoYomi DNR] updateDynamicRules also failed:', dynErr);
+      }
     }
   }
 }

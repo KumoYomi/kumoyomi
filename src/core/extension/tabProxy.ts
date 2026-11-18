@@ -55,6 +55,8 @@ interface CandidateTab {
   exactOrigin: boolean;
   score: number;
   lastAccessed: number;
+  discarded: boolean;
+  status?: string;
 }
 
 function getCandidateTabs(
@@ -62,6 +64,7 @@ function getCandidateTabs(
     id?: number;
     url?: string;
     title?: string;
+    status?: string;
     active?: boolean;
     discarded?: boolean;
     lastAccessed?: number;
@@ -86,6 +89,8 @@ function getCandidateTabs(
       exactOrigin: match.exactOrigin,
       score,
       lastAccessed: tab.lastAccessed ?? 0,
+      discarded: Boolean(tab.discarded),
+      status: tab.status,
     });
   }
 
@@ -94,6 +99,33 @@ function getCandidateTabs(
     if (a.lastAccessed !== b.lastAccessed) return b.lastAccessed - a.lastAccessed;
     return b.id - a.id;
   });
+}
+
+async function ensureTabAwakeAndComplete(
+  tabId: number,
+  discarded?: boolean,
+  status?: string,
+): Promise<void> {
+  if (!browser.tabs?.get) return;
+  const shouldReload = Boolean(discarded) || status === 'unloaded';
+  if (shouldReload && browser.tabs.reload) {
+    await browser.tabs.reload(tabId).catch(() => {});
+  } else if (status !== 'loading') {
+    return;
+  }
+
+  const maxWaitMs = shouldReload ? 4500 : 2500;
+  const stepMs = shouldReload ? 180 : 150;
+  const deadline = Date.now() + maxWaitMs;
+
+  while (Date.now() < deadline) {
+    const info = await browser.tabs.get(tabId).catch(() => null);
+    if (!info) return;
+    if (info.status === 'complete' && !info.discarded) {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
 }
 
 function isTabResultCloudflare(result: TabProxyFetchResult): boolean {
@@ -266,14 +298,28 @@ export async function proxyFetchInOpenTab(
       isCrossOrigin,
     };
 
-    try {
+    await ensureTabAwakeAndComplete(tab.id, tab.discarded, tab.status);
+
+    const runExec = async () => {
       const results = await browser.scripting.executeScript({
         target: { tabId: tab.id },
         world: 'MAIN',
         func: inPageFetchExecutor,
         args: [payload],
       });
-      const firstResult = results[0]?.result as TabProxyFetchResult | undefined;
+      return results[0]?.result as TabProxyFetchResult | undefined;
+    };
+
+    try {
+      let firstResult: TabProxyFetchResult | undefined;
+      try {
+        firstResult = await runExec();
+      } catch {
+        // Tab may be mid-move between windows or waking up; settle once and retry.
+        await new Promise((r) => setTimeout(r, 250));
+        await ensureTabAwakeAndComplete(tab.id, false, 'loading');
+        firstResult = await runExec();
+      }
       if (!firstResult?.foundTab) continue;
 
       if (isTabResultCloudflare(firstResult)) {
@@ -283,7 +329,7 @@ export async function proxyFetchInOpenTab(
 
       return firstResult;
     } catch {
-      // Onglet inaccessible ou fermé : essai sur le candidat suivant
+      // Tab inaccessible or closed: try next candidate
     }
   }
 

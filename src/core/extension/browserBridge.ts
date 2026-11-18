@@ -32,7 +32,13 @@ export type BackgroundMessage =
 export interface UpdateCheckSummary {
   checkedMangas: number;
   newChaptersCount: number;
-  errors: Array<{ mangaTitle: string; sourceId: string; message: string; isCloudflare?: boolean }>;
+  errors: Array<{
+    mangaTitle: string;
+    sourceId: string;
+    message: string;
+    isCloudflare?: boolean;
+    probeUrl?: string;
+  }>;
 }
 
 interface ExtensionRuntimeLike {
@@ -80,6 +86,28 @@ export async function sendBackgroundMessage<T = unknown>(
   }
 }
 
+export async function checkGlobalOriginPermission(): Promise<boolean> {
+  const api = getApi();
+  if (!api?.permissions) return true;
+  try {
+    return await api.permissions.contains({ origins: ['https://*/*', 'http://*/*'] });
+  } catch {
+    return true;
+  }
+}
+
+export function requestGlobalOriginPermission(): Promise<boolean> {
+  const api = getApi();
+  if (!api?.permissions) return Promise.resolve(true);
+  try {
+    return api.permissions
+      .request({ origins: ['https://*/*', 'http://*/*'] })
+      .catch(() => false);
+  } catch {
+    return Promise.resolve(false);
+  }
+}
+
 export async function checkOriginPermission(baseUrl: string): Promise<boolean> {
   const api = getApi();
   if (!api?.permissions) return true;
@@ -91,14 +119,38 @@ export async function checkOriginPermission(baseUrl: string): Promise<boolean> {
   }
 }
 
-export async function requestOriginPermission(baseUrl: string): Promise<boolean> {
+export function requestOriginPermission(baseUrl: string): Promise<boolean> {
   const api = getApi();
-  if (!api?.permissions) return true;
+  if (!api?.permissions) return Promise.resolve(true);
   try {
-    const origin = new URL(baseUrl).origin;
-    return await api.permissions.request({ origins: [`${origin}/*`] });
+    const parsed = new URL(baseUrl);
+    const root = getSiteRootDomain(parsed.hostname);
+    const includeSubdomains =
+      root.includes('.') &&
+      !/^\d+\.\d+\.\d+\.\d+$/.test(parsed.hostname) &&
+      parsed.hostname !== 'localhost';
+    const origins = [
+      `${parsed.origin}/*`,
+      ...(includeSubdomains ? [`https://*.${root}/*`, `http://*.${root}/*`] : []),
+    ];
+    return api.permissions.request({ origins }).catch(() => false);
   } catch {
-    return false;
+    return Promise.resolve(false);
+  }
+}
+
+export function requestRepositoryOriginPermission(rawUrl: string): Promise<boolean> {
+  const api = getApi();
+  if (!api?.permissions) return Promise.resolve(true);
+  try {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return Promise.resolve(false);
+    const origins = trimmed.includes('github.com')
+      ? ['https://raw.githubusercontent.com/*', 'https://github.com/*']
+      : [`${new URL(trimmed).origin}/*`];
+    return api.permissions.request({ origins }).catch(() => false);
+  } catch {
+    return Promise.resolve(false);
   }
 }
 
@@ -170,34 +222,63 @@ export function getSiteRootDomain(hostname: string): string {
 }
 
 const TAB_PROXY_STORAGE_KEY = 'kumoyomi:tab_proxied_domains';
+const TAB_PROXY_PERSIST_KEY = 'kumoyomi:tab_proxied_domains_persist';
 
-function loadPersistedTabProxiedDomains(): Set<string> {
+function readDomainList(storage: Storage | undefined, key: string): string[] {
   try {
-    if (typeof sessionStorage === 'undefined') return new Set();
-    const raw = sessionStorage.getItem(TAB_PROXY_STORAGE_KEY);
-    if (!raw) return new Set();
+    if (!storage) return [];
+    const raw = storage.getItem(key);
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((item): item is string => typeof item === 'string'));
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string');
   } catch {
-    return new Set();
+    return [];
   }
 }
 
-function persistTabProxiedDomains(domains: Set<string>): void {
+function loadPersistedTabProxiedDomains(): Set<string> {
+  const sessionList = readDomainList(
+    typeof sessionStorage !== 'undefined' ? sessionStorage : undefined,
+    TAB_PROXY_STORAGE_KEY,
+  );
+  const localList = readDomainList(
+    typeof localStorage !== 'undefined' ? localStorage : undefined,
+    TAB_PROXY_PERSIST_KEY,
+  );
+  return new Set([...sessionList, ...localList]);
+}
+
+function writeDomainList(storage: Storage | undefined, key: string, values: string[]): void {
   try {
-    if (typeof sessionStorage === 'undefined') return;
-    if (domains.size === 0) {
-      sessionStorage.removeItem(TAB_PROXY_STORAGE_KEY);
+    if (!storage) return;
+    if (values.length === 0) {
+      storage.removeItem(key);
     } else {
-      sessionStorage.setItem(TAB_PROXY_STORAGE_KEY, JSON.stringify([...domains]));
+      storage.setItem(key, JSON.stringify(values));
     }
   } catch {
     // Ignore storage errors in restricted contexts or private mode.
   }
 }
 
+function persistTabProxiedDomains(domains: Set<string>): void {
+  const arr = [...domains];
+  writeDomainList(
+    typeof sessionStorage !== 'undefined' ? sessionStorage : undefined,
+    TAB_PROXY_STORAGE_KEY,
+    arr,
+  );
+  writeDomainList(
+    typeof localStorage !== 'undefined' ? localStorage : undefined,
+    TAB_PROXY_PERSIST_KEY,
+    arr,
+  );
+}
+
 const tabProxiedRootDomains = loadPersistedTabProxiedDomains();
+const lastUnlockedAtByRoot = new Map<string, number>();
+const cfUnlockListeners = new Set<(rootDomain: string) => void>();
 
 function extractSiteRootFromUrl(rawUrl: string): string | null {
   try {
@@ -227,8 +308,42 @@ export function isSiteTabProxied(rawUrl: string): boolean {
   return Boolean(root && tabProxiedRootDomains.has(root));
 }
 
+export function notifyCloudflareDomainUnlocked(rawUrl: string): void {
+  const root = extractSiteRootFromUrl(rawUrl);
+  if (!root) return;
+  lastUnlockedAtByRoot.set(root, Date.now());
+  for (const listener of Array.from(cfUnlockListeners)) {
+    try {
+      listener(root);
+    } catch {
+      // Ignore subscriber errors
+    }
+  }
+}
+
+export function getLastCloudflareUnlockTime(rawUrl: string): number {
+  const root = extractSiteRootFromUrl(rawUrl);
+  if (!root) return 0;
+  return lastUnlockedAtByRoot.get(root) ?? 0;
+}
+
+export function onCloudflareDomainUnlocked(rawUrl: string, cb: () => void): () => void {
+  const expectedRoot = extractSiteRootFromUrl(rawUrl);
+  if (!expectedRoot) return () => {};
+  const listener = (unlockedRoot: string) => {
+    if (unlockedRoot === expectedRoot) {
+      cb();
+    }
+  };
+  cfUnlockListeners.add(listener);
+  return () => {
+    cfUnlockListeners.delete(listener);
+  };
+}
+
 export function clearAllSiteTabProxyHints(): void {
   tabProxiedRootDomains.clear();
+  lastUnlockedAtByRoot.clear();
   persistTabProxiedDomains(tabProxiedRootDomains);
 }
 

@@ -35,6 +35,13 @@ export interface FieldExtractor {
 
 export type ResponseType = 'html' | 'json' | 'json-html';
 
+export interface ScriptJsonExtractionConfig {
+  /** Optional CSS selector targeting the <script> element (e.g. "script#__NEXT_DATA__"). Defaults to scanning all <script> tags. */
+  selector?: string;
+  /** Optional regex applied to script text; capture group 1 (or full match) must be valid JSON (e.g. "ts_reader\\.run\\((\\{[\\s\\S]*?\\})\\)\\s*;?"). */
+  regex?: string;
+}
+
 export interface RequestConfig {
   method?: 'GET' | 'POST';
   url: string;
@@ -45,6 +52,8 @@ export interface RequestConfig {
   responseType?: ResponseType;
   /** Chemin pointé vers le fragment HTML quand responseType === 'json-html' (ex: "data.html"). */
   jsonHtmlPath?: string;
+  /** Extract embedded JSON from <script> tags inside an HTML document (e.g. __NEXT_DATA__, ts_reader.run). */
+  scriptJson?: ScriptJsonExtractionConfig;
 }
 
 export interface CatalogueEndpointConfig {

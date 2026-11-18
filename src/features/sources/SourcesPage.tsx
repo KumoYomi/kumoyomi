@@ -6,39 +6,355 @@ import {
   FolderGit2,
   Link2,
   Loader2,
+  Play,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
   Trash2,
+  Wrench,
+  X,
 } from 'lucide-react';
-import { type ChangeEvent, type FormEvent, useEffect, useMemo, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { navigate } from '@/src/app/router';
+import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
 import { db } from '@/src/core/db/db';
 import {
+  checkGlobalOriginPermission,
   checkOriginPermission,
   clearSiteTabProxied,
+  isExtensionContext,
   isSiteTabProxied,
   requestOriginPermission,
+  requestRepositoryOriginPermission,
 } from '@/src/core/extension/browserBridge';
 import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
 import { useTranslation } from '@/src/core/i18n';
+import { revokeScopeBlobUrls } from '@/src/core/image-loader/blobImageLoader';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import {
   addOrRefreshRepositoryByUrl,
   importLocalJsonConfig,
   removeRepository,
+  removeSource,
   setSourceEnabled,
 } from '@/src/core/parser/repositoryService';
 import type { InstalledSourceRecord } from '@/src/core/types/manga';
+import type {
+  ParsedCataloguePage,
+  ParsedChapterItem,
+  ParsedMangaDetails,
+  ParsedPageItem,
+} from '@/src/core/types/source';
 
 type TestResult =
   | { status: 'loading' }
   | { status: 'ok'; count: number; sampleTitle?: string }
   | { status: 'cloudflare'; url: string; probeUrl?: string }
   | { status: 'error'; message: string };
+
+interface SourceInspectorPanelProps {
+  source: InstalledSourceRecord;
+  onClose: () => void;
+}
+
+function SourceInspectorPanel({ source, onClose }: SourceInspectorPanelProps) {
+  const { t } = useTranslation();
+  const [catMode, setCatMode] = useState<'popular' | 'latest' | 'search'>('popular');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [catRunning, setCatRunning] = useState(false);
+  const [catResult, setCatResult] = useState<{ ms: number; page: ParsedCataloguePage } | null>(null);
+  const [catError, setCatError] = useState<string | null>(null);
+
+  const [mangaUrl, setMangaUrl] = useState('');
+  const [detailsRunning, setDetailsRunning] = useState(false);
+  const [detailsResult, setDetailsResult] = useState<{
+    ms: number;
+    details: ParsedMangaDetails;
+    chapters: ParsedChapterItem[];
+  } | null>(null);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
+
+  const [chapterUrl, setChapterUrl] = useState('');
+  const [pagesRunning, setPagesRunning] = useState(false);
+  const [pagesResult, setPagesResult] = useState<{ ms: number; pages: ParsedPageItem[] } | null>(
+    null,
+  );
+  const [pagesError, setPagesError] = useState<string | null>(null);
+
+  const previewScope = `inspector_${source.id}`;
+  useEffect(() => {
+    return () => {
+      revokeScopeBlobUrls(previewScope);
+    };
+  }, [previewScope]);
+
+  async function runCatalogueTest() {
+    setCatRunning(true);
+    setCatError(null);
+    const t0 = performance.now();
+    try {
+      const page = await runWithAutoCloudflarePopup(() => {
+        if (catMode === 'latest') return parserEngine.getLatest(source.resolvedConfig, 1);
+        if (catMode === 'search') {
+          return parserEngine.search(source.resolvedConfig, searchQuery.trim() || 'a', 1);
+        }
+        return parserEngine.getPopular(source.resolvedConfig, 1);
+      });
+      setCatResult({ ms: Math.round(performance.now() - t0), page });
+    } catch (err) {
+      setCatError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setCatRunning(false);
+    }
+  }
+
+  async function runDetailsTest(targetUrl = mangaUrl) {
+    const clean = targetUrl.trim();
+    if (!clean) return;
+    setMangaUrl(clean);
+    setDetailsRunning(true);
+    setDetailsError(null);
+    const t0 = performance.now();
+    try {
+      const data = await runWithAutoCloudflarePopup(async () => {
+        const details = await parserEngine.getMangaDetails(source.resolvedConfig, clean);
+        const chapters = await parserEngine.getChapters(
+          source.resolvedConfig,
+          details.url || clean,
+          details.rawHtml,
+          details.rawJson,
+        );
+        return { details, chapters };
+      });
+      setDetailsResult({ ms: Math.round(performance.now() - t0), ...data });
+    } catch (err) {
+      setDetailsError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setDetailsRunning(false);
+    }
+  }
+
+  async function runPagesTest(targetUrl = chapterUrl) {
+    const clean = targetUrl.trim();
+    if (!clean) return;
+    setChapterUrl(clean);
+    setPagesRunning(true);
+    setPagesError(null);
+    const t0 = performance.now();
+    try {
+      const pages = await runWithAutoCloudflarePopup(() =>
+        parserEngine.getChapterPages(source.resolvedConfig, clean),
+      );
+      setPagesResult({ ms: Math.round(performance.now() - t0), pages });
+    } catch (err) {
+      setPagesError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setPagesRunning(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-4 rounded-xl border border-zinc-800 bg-zinc-950/90 p-4 text-xs">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-2">
+        <span className="flex items-center gap-2 font-semibold text-zinc-200">
+          <Wrench className="h-3.5 w-3.5 text-rose-400" />
+          {t('sources.inspectorTitle')}
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          title={t('sources.inspectorClose')}
+          aria-label={t('sources.inspectorClose')}
+          className="rounded-lg border border-zinc-800 bg-zinc-900 p-1 text-zinc-400 hover:text-white"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Step 1: Catalogue / Search */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={catMode}
+            onChange={(e) => setCatMode(e.target.value as 'popular' | 'latest' | 'search')}
+            className="rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-zinc-200"
+          >
+            <option value="popular">{t('sources.inspectorModePopular')}</option>
+            <option value="latest">{t('sources.inspectorModeLatest')}</option>
+            <option value="search">{t('sources.inspectorModeSearch')}</option>
+          </select>
+          {catMode === 'search' && (
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('common.search')}
+              className="w-44 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-zinc-200"
+            />
+          )}
+          <button
+            type="button"
+            disabled={catRunning}
+            onClick={() => void runCatalogueTest()}
+            className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+          >
+            {catRunning ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+            {t('sources.inspectorRunBtn')}
+          </button>
+          {catResult && (
+            <span className="font-mono text-[11px] text-emerald-300">
+              {catResult.page.items.length} item(s) · {t('sources.inspectorDuration', { ms: catResult.ms })} ·{' '}
+              {t('sources.inspectorHasNext', { val: String(catResult.page.hasNextPage) })}
+            </span>
+          )}
+        </div>
+        {catError && <p className="text-rose-300">{catError}</p>}
+        {catResult && catResult.page.items.length > 0 && (
+          <div className="space-y-1">
+            {catResult.page.items.slice(0, 3).map((item) => (
+              <div
+                key={item.url}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-2.5 py-1.5"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium text-zinc-200">{item.title}</p>
+                  <p className="truncate font-mono text-[10px] text-zinc-500">{item.url}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void runDetailsTest(item.url)}
+                  className="shrink-0 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] font-medium text-rose-300 hover:bg-zinc-800"
+                >
+                  {t('sources.inspectorUseManga')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Step 2: Manga Details & Chapters */}
+      <div className="space-y-2 border-t border-zinc-800/80 pt-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            value={mangaUrl}
+            onChange={(e) => setMangaUrl(e.target.value)}
+            placeholder={t('sources.inspectorMangaUrlPlaceholder')}
+            className="min-w-[220px] flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600"
+          />
+          <button
+            type="button"
+            disabled={detailsRunning || !mangaUrl.trim()}
+            onClick={() => void runDetailsTest()}
+            className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+          >
+            {detailsRunning ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="h-3 w-3" />
+            )}
+            {t('sources.inspectorRunBtn')}
+          </button>
+          {detailsResult && (
+            <span className="font-mono text-[11px] text-emerald-300">
+              {t('sources.inspectorDetailsSection', { count: detailsResult.chapters.length })} ·{' '}
+              {t('sources.inspectorDuration', { ms: detailsResult.ms })}
+            </span>
+          )}
+        </div>
+        {detailsError && <p className="text-rose-300">{detailsError}</p>}
+        {detailsResult && (
+          <div className="space-y-1.5 rounded-lg border border-zinc-800/80 bg-zinc-900/40 p-2.5">
+            <p className="text-zinc-200">
+              <strong>{detailsResult.details.title}</strong> · {detailsResult.details.status}
+              {detailsResult.details.author ? ` · ${detailsResult.details.author}` : ''}
+              {detailsResult.details.genres.length > 0
+                ? ` · [${detailsResult.details.genres.slice(0, 4).join(', ')}]`
+                : ''}
+            </p>
+            {detailsResult.chapters.slice(0, 3).map((ch) => (
+              <div
+                key={ch.url}
+                className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-800/60 bg-zinc-950/60 px-2 py-1"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-zinc-300">{ch.title}</p>
+                  <p className="truncate font-mono text-[10px] text-zinc-500">{ch.url}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void runPagesTest(ch.url)}
+                  className="shrink-0 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[11px] font-medium text-rose-300 hover:bg-zinc-800"
+                >
+                  {t('sources.inspectorUseChapter')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Step 3: Chapter Pages + Live Referer Preview */}
+      <div className="space-y-2 border-t border-zinc-800/80 pt-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            value={chapterUrl}
+            onChange={(e) => setChapterUrl(e.target.value)}
+            placeholder={t('sources.inspectorChapterUrlPlaceholder')}
+            className="min-w-[220px] flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 placeholder:text-zinc-600"
+          />
+          <button
+            type="button"
+            disabled={pagesRunning || !chapterUrl.trim()}
+            onClick={() => void runPagesTest()}
+            className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+          >
+            {pagesRunning ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="h-3 w-3" />
+            )}
+            {t('sources.inspectorRunBtn')}
+          </button>
+          {pagesResult && (
+            <span className="font-mono text-[11px] text-emerald-300">
+              {t('sources.inspectorPagesCount', { count: pagesResult.pages.length })} ·{' '}
+              {t('sources.inspectorDuration', { ms: pagesResult.ms })}
+            </span>
+          )}
+        </div>
+        {pagesError && <p className="text-rose-300">{pagesError}</p>}
+        {pagesResult && pagesResult.pages.length > 0 && (
+          <div className="space-y-2">
+            <ul className="space-y-0.5 font-mono text-[10px] text-zinc-500">
+              {pagesResult.pages.slice(0, 3).map((p) => (
+                <li key={p.index} className="truncate">
+                  #{p.index + 1}: {p.imageUrl}
+                </li>
+              ))}
+            </ul>
+            <p className="text-[11px] font-medium text-zinc-400">
+              {t('sources.inspectorPreviewLabel')}
+            </p>
+            <AntiHotlinkImage
+              src={pagesResult.pages[0]!.imageUrl}
+              referer={source.baseUrl}
+              scopeId={previewScope}
+              alt="Page 1"
+              className="max-h-64 w-auto rounded-lg border border-zinc-800 object-contain"
+              placeholderClassName="h-44 w-36 rounded-lg"
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export function SourcesPage() {
   const { t } = useTranslation();
@@ -58,6 +374,15 @@ export function SourcesPage() {
   const [langFilter, setLangFilter] = useState<string>('all');
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [sessionNonce, setSessionNonce] = useState(0);
+  const [inspectingSourceId, setInspectingSourceId] = useState<string | null>(null);
+  const globalPermRef = useRef(true);
+
+  useEffect(() => {
+    if (!isExtensionContext()) return;
+    void checkGlobalOriginPermission().then((ok) => {
+      globalPermRef.current = ok;
+    });
+  }, []);
 
   const availableLangs = useMemo(
     () => Array.from(new Set(sources.map((s) => s.lang.toLowerCase()))).sort(),
@@ -91,11 +416,18 @@ export function SourcesPage() {
 
   async function handleAddRepository(e: FormEvent) {
     e.preventDefault();
-    if (!repoUrlInput.trim()) return;
+    const rawUrl = repoUrlInput.trim();
+    if (!rawUrl) return;
+    // Call Firefox permissions.request synchronously inside user gesture before any await
+    const permPromise =
+      isExtensionContext() && !globalPermRef.current
+        ? requestRepositoryOriginPermission(rawUrl)
+        : null;
     setAddingRepo(true);
     setFeedback(null);
     try {
-      const res = await addOrRefreshRepositoryByUrl(repoUrlInput.trim());
+      if (permPromise) await permPromise;
+      const res = await addOrRefreshRepositoryByUrl(rawUrl);
       setRepoUrlInput('');
       setFeedback({
         kind: 'ok',
@@ -222,11 +554,13 @@ export function SourcesPage() {
   }
 
   async function handleTestSource(source: InstalledSourceRecord) {
+    // Request host permission synchronously inside the click handler before any await
+    const permPromise =
+      permissionsMap[source.id] === false ? requestOriginPermission(source.baseUrl) : null;
     setTestResults((prev) => ({ ...prev, [source.id]: { status: 'loading' } }));
     try {
-      const hasPerm = await checkOriginPermission(source.baseUrl);
-      if (!hasPerm) {
-        const granted = await requestOriginPermission(source.baseUrl);
+      if (permPromise) {
+        const granted = await permPromise;
         setPermissionsMap((prev) => ({ ...prev, [source.id]: granted }));
       }
       const page = await runWithAutoCloudflarePopup(() =>
@@ -259,9 +593,10 @@ export function SourcesPage() {
     }
   }
 
-  async function handleGrantPermission(source: InstalledSourceRecord) {
-    const granted = await requestOriginPermission(source.baseUrl);
-    setPermissionsMap((prev) => ({ ...prev, [source.id]: granted }));
+  function handleGrantPermission(source: InstalledSourceRecord) {
+    void requestOriginPermission(source.baseUrl).then((granted) => {
+      setPermissionsMap((prev) => ({ ...prev, [source.id]: granted }));
+    });
   }
 
   return (
@@ -572,6 +907,21 @@ export function SourcesPage() {
 
                     <button
                       type="button"
+                      onClick={() =>
+                        setInspectingSourceId((prev) => (prev === source.id ? null : source.id))
+                      }
+                      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition ${
+                        inspectingSourceId === source.id
+                          ? 'border-rose-500/50 bg-rose-500/15 text-rose-200'
+                          : 'border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                      }`}
+                    >
+                      <Wrench className="h-3.5 w-3.5" />
+                      {t('sources.inspectBtn')}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => void setSourceEnabled(source.id, !source.enabled)}
                       className={`rounded-xl px-3.5 py-1.5 text-xs font-semibold transition ${
                         source.enabled
@@ -581,8 +931,27 @@ export function SourcesPage() {
                     >
                       {source.enabled ? t('sources.enabled') : t('sources.disabled')}
                     </button>
+
+                    {source.repoId === 'local_manual' && (
+                      <button
+                        type="button"
+                        title={t('sources.deleteSource')}
+                        aria-label={t('sources.deleteSource')}
+                        onClick={() => void removeSource(source.id)}
+                        className="rounded-xl border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:border-rose-500/40 hover:text-rose-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {inspectingSourceId === source.id && (
+                  <SourceInspectorPanel
+                    source={source}
+                    onClose={() => setInspectingSourceId(null)}
+                  />
+                )}
 
                 {test?.status === 'ok' && (
                   <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200">

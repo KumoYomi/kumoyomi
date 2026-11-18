@@ -9,12 +9,19 @@ import {
   PanelLeftOpen,
   Search,
   Settings,
+  ShieldAlert,
   X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { type AppRoute, buildHashUrl, navigate } from '@/src/app/router';
 import { db } from '@/src/core/db/db';
+import {
+  checkGlobalOriginPermission,
+  isExtensionContext,
+  requestGlobalOriginPermission,
+} from '@/src/core/extension/browserBridge';
 import { LOCALE_OPTIONS, useTranslation } from '@/src/core/i18n';
+import { syncAllSourceRulesToBackground } from '@/src/core/parser/repositoryService';
 import type { AppLocale } from '@/src/core/types/manga';
 
 const SIDEBAR_COLLAPSE_KEY = 'kumoyomi:sidebar_collapsed';
@@ -28,10 +35,10 @@ function readExtensionVersion(): string {
     return (
       g.browser?.runtime?.getManifest?.().version ??
       g.chrome?.runtime?.getManifest?.().version ??
-      '0.3.0'
+      '0.4.0'
     );
   } catch {
-    return '0.3.0';
+    return '0.4.0';
   }
 }
 
@@ -58,6 +65,18 @@ export function AppShell({ route, children }: AppShellProps) {
     }
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [hasGlobalPerm, setHasGlobalPerm] = useState(true);
+
+  useEffect(() => {
+    if (!isExtensionContext()) return;
+    let active = true;
+    void checkGlobalOriginPermission().then((ok) => {
+      if (active) setHasGlobalPerm(ok);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -346,7 +365,34 @@ export function AppShell({ route, children }: AppShellProps) {
       </aside>
 
       <main className="min-w-0 flex-1 overflow-x-hidden">
-        <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-8 sm:py-7">{children}</div>
+        <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-8 sm:py-7">
+          {!hasGlobalPerm && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-3 text-xs text-amber-100">
+              <div className="flex items-start gap-2.5">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                <div>
+                  <p className="font-semibold text-amber-200">{t('shell.permBannerTitle')}</p>
+                  <p className="mt-0.5 text-amber-200/80">{t('shell.permBannerDesc')}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void requestGlobalOriginPermission().then((granted) => {
+                    if (granted) {
+                      setHasGlobalPerm(true);
+                      void syncAllSourceRulesToBackground();
+                    }
+                  });
+                }}
+                className="shrink-0 rounded-xl bg-amber-500 px-3.5 py-2 font-semibold text-zinc-950 transition hover:bg-amber-400"
+              >
+                {t('shell.permGrantBtn')}
+              </button>
+            </div>
+          )}
+          {children}
+        </div>
       </main>
     </div>
   );

@@ -71,6 +71,7 @@ export interface MangaEntity {
   genres: string[];
   favorite: boolean;
   libraryStatus: LibraryStatus;
+  categories?: string[];
   preferredSourceId?: string;
   unreadCount: number;
   latestChapterNumber?: number;
@@ -130,6 +131,9 @@ export interface AppSettings {
   preloadPagesCount: number;
   updateIntervalMinutes: number;
   autoOpenCloudflarePopup?: boolean;
+  autoDeleteOfflineOnRead?: boolean;
+  desktopNotifications?: boolean;
+  customCategories?: string[];
   lastGlobalUpdateCheck?: number;
 }
 

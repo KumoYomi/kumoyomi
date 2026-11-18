@@ -1,4 +1,4 @@
-import { db, hashStableId, normalizeMangaKey } from '@/src/core/db/db';
+import { db, getOrCreateSettings, hashStableId, normalizeMangaKey } from '@/src/core/db/db';
 import type {
   ChapterEntity,
   LibraryStatus,
@@ -246,6 +246,66 @@ export async function markChaptersReadState(
     const unreadCount = all.filter((c) => !c.read).length;
     await db.mangas.update(mangaId, { unreadCount });
   });
+
+  if (read && chapterIds.length > 0) {
+    const settings = await getOrCreateSettings();
+    if (settings.autoDeleteOfflineOnRead) {
+      await db.transaction('rw', [db.offlineChapters, db.chapterPageBlobs], async () => {
+        for (const id of chapterIds) {
+          await db.chapterPageBlobs.where('chapterId').equals(id).delete();
+          await db.offlineChapters.delete(id);
+        }
+      });
+    }
+  }
+}
+
+export async function setMangaCategories(mangaId: string, categories: string[]): Promise<void> {
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const raw of categories) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(trimmed);
+  }
+  await db.mangas.update(mangaId, {
+    categories: clean,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function addCustomCategory(rawName: string): Promise<string[]> {
+  const trimmed = rawName.trim();
+  const settings = await getOrCreateSettings();
+  const existing = settings.customCategories ?? [];
+  if (!trimmed) return existing;
+  if (existing.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+    return existing;
+  }
+  const next = [...existing, trimmed];
+  await db.settings.put({ ...settings, customCategories: next });
+  return next;
+}
+
+export async function removeCustomCategory(name: string): Promise<string[]> {
+  const settings = await getOrCreateSettings();
+  const targetLower = name.trim().toLowerCase();
+  const next = (settings.customCategories ?? []).filter(
+    (c) => c.toLowerCase() !== targetLower,
+  );
+  await db.settings.put({ ...settings, customCategories: next });
+
+  const allMangas = await db.mangas.toArray();
+  for (const m of allMangas) {
+    if (m.categories?.some((c) => c.toLowerCase() === targetLower)) {
+      const updatedCats = m.categories.filter((c) => c.toLowerCase() !== targetLower);
+      await db.mangas.update(m.id, { categories: updatedCats });
+    }
+  }
+  return next;
 }
 
 export async function recordChapterProgress(params: {

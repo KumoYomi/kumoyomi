@@ -277,6 +277,19 @@ export async function importLocalJsonConfig(
   return { message: `Template "${tpl.id}" imported successfully.` };
 }
 
+async function deleteOfflineForSources(sourceIds: string[]): Promise<void> {
+  for (const sourceId of sourceIds) {
+    const cachedChapters = await db.offlineChapters
+      .where('sourceId')
+      .equals(sourceId)
+      .primaryKeys();
+    for (const chapterId of cachedChapters) {
+      await db.chapterPageBlobs.where('chapterId').equals(chapterId).delete();
+      await db.offlineChapters.delete(chapterId);
+    }
+  }
+}
+
 export async function removeRepository(repoId: string): Promise<void> {
   await db.transaction(
     'rw',
@@ -288,15 +301,28 @@ export async function removeRepository(repoId: string): Promise<void> {
       const sIds = await db.sources.where('repoId').equals(repoId).primaryKeys();
       if (sIds.length) {
         await db.sources.bulkDelete(sIds);
-        for (const sourceId of sIds) {
-          const cachedChapters = await db.offlineChapters
-            .where('sourceId')
-            .equals(sourceId)
-            .primaryKeys();
-          for (const chapterId of cachedChapters) {
-            await db.chapterPageBlobs.where('chapterId').equals(chapterId).delete();
-            await db.offlineChapters.delete(chapterId);
-          }
+        await deleteOfflineForSources(sIds);
+      }
+    },
+  );
+  await syncAllSourceRulesToBackground();
+}
+
+export async function removeSource(sourceId: string): Promise<void> {
+  await db.transaction(
+    'rw',
+    [db.repositories, db.templates, db.sources, db.offlineChapters, db.chapterPageBlobs],
+    async () => {
+      const existing = await db.sources.get(sourceId);
+      await db.sources.delete(sourceId);
+      await deleteOfflineForSources([sourceId]);
+      if (existing?.repoId === 'local_manual') {
+        const [remSources, remTemplates] = await Promise.all([
+          db.sources.where('repoId').equals('local_manual').count(),
+          db.templates.where('repoId').equals('local_manual').count(),
+        ]);
+        if (remSources === 0 && remTemplates === 0) {
+          await db.repositories.delete('local_manual');
         }
       }
     },

@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
   Columns2,
   Eye,
   FileImage,
@@ -13,6 +14,7 @@ import {
   RotateCcw,
   Rows3,
   SlidersHorizontal,
+  X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
@@ -29,7 +31,7 @@ import {
   fetchImageAsBlobUrl,
   revokeScopeBlobUrls,
 } from '@/src/core/image-loader/blobImageLoader';
-import { getOfflineChapterPages } from '@/src/core/offline/offlineCache';
+import { getOfflineChapterPages, removeOfflineChapter } from '@/src/core/offline/offlineCache';
 import { parserEngine } from '@/src/core/parser/engine';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 import type { PageFitMode, ReaderMode, ReadingDirection } from '@/src/core/types/manga';
@@ -157,6 +159,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
   const [currentPage, setCurrentPage] = useState<number>(0);
   const [showHud, setShowHud] = useState<boolean>(true);
   const [showOptions, setShowOptions] = useState<boolean>(false);
+  const [showHelp, setShowHelp] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
   const scopeId = `chapter_${chapterId}`;
@@ -203,6 +206,24 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     };
   }, [scopeId]);
 
+  // Auto-delete offline chapter blobs on chapter exit if marked read and enabled in settings
+  useEffect(() => {
+    return () => {
+      void (async () => {
+        try {
+          const settings = await getOrCreateSettings();
+          if (!settings.autoDeleteOfflineOnRead) return;
+          const ch = await db.chapters.get(chapterId);
+          if (ch?.read) {
+            await removeOfflineChapter(chapterId);
+          }
+        } catch {
+          // Ignore cleanup errors on exit
+        }
+      })();
+    };
+  }, [chapterId]);
+
   const orderedAscChapters = useMemo(
     () => [...allChapters].sort((a, b) => b.orderIndex - a.orderIndex),
     [allChapters],
@@ -247,7 +268,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
         if (result.length === 0) {
           setPageError({
             kind: 'error',
-            message: 'Aucune planche trouvée dans ce chapitre.',
+            message: t('reader.noPages'),
           });
         } else {
           setPages(result);
@@ -271,7 +292,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
         } else {
           setPageError({
             kind: 'error',
-            message: err instanceof Error ? err.message : 'Erreur lors du chargement des pages.',
+            message: err instanceof Error ? err.message : t('reader.loadError'),
           });
         }
       } finally {
@@ -518,8 +539,18 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
         navigate({ name: 'reader', mangaId, chapterId: prevChapter.id });
       } else if (e.key === ']' && nextChapter) {
         navigate({ name: 'reader', mangaId, chapterId: nextChapter.id });
-      } else if (e.key === 'Escape' && !document.fullscreenElement) {
-        navigate({ name: 'manga', mangaId });
+      } else if (e.key === '?' || e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+      } else if (e.key === 'Escape') {
+        if (showHelp) {
+          e.preventDefault();
+          setShowHelp(false);
+          return;
+        }
+        if (!document.fullscreenElement) {
+          navigate({ name: 'manga', mangaId });
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -533,6 +564,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     mangaId,
     readerMode,
     switchReaderMode,
+    showHelp,
   ]);
 
   useEffect(() => {
@@ -684,6 +716,16 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               className="rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
             >
               <SlidersHorizontal className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowHelp((v) => !v)}
+              title={t('reader.helpTooltip')}
+              aria-label={t('reader.helpTooltip')}
+              className="rounded-xl border border-zinc-800 bg-zinc-900 p-2 text-zinc-300 hover:bg-zinc-800"
+            >
+              <CircleHelp className="h-4 w-4" />
             </button>
 
             <button
@@ -1105,6 +1147,48 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             )}
           </div>
         </footer>
+      )}
+
+      {/* Keyboard Shortcuts Help Modal (?) */}
+      {showHelp && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs"
+          onClick={() => setShowHelp(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reader-help-title"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md space-y-4 rounded-2xl border border-zinc-800 bg-[#12121a] p-6 text-sm shadow-2xl"
+          >
+            <div className="flex items-center justify-between">
+              <h2 id="reader-help-title" className="text-base font-bold text-white">
+                {t('reader.helpTitle')}
+              </h2>
+              <button
+                type="button"
+                aria-label={t('common.close')}
+                onClick={() => setShowHelp(false)}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <ul className="space-y-2 text-xs text-zinc-300">
+              <li>{t('reader.helpKeyArrows')}</li>
+              <li>{t('reader.helpKeySpace')}</li>
+              <li>{t('reader.helpKeyFullscreen')}</li>
+              <li>{t('reader.helpKeyMode')}</li>
+              <li>{t('reader.helpKeyChapters')}</li>
+              <li>{t('reader.helpKeyHelp')}</li>
+              <li>{t('reader.helpKeyEsc')}</li>
+            </ul>
+            <p className="border-t border-zinc-800 pt-3 text-xs text-zinc-400">
+              {t('reader.helpClickZones')}
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

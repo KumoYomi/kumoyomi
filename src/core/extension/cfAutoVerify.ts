@@ -1,13 +1,14 @@
 import { getOrCreateSettings } from '@/src/core/db/db';
 import {
+  getLastCloudflareUnlockTime,
   isExtensionContext,
   requestCloudflareVerificationPopup,
 } from '@/src/core/extension/browserBridge';
 import { CloudflareChallengeError } from '@/src/core/parser/httpClient';
 
 /**
- * Déclenche la petite fenêtre de vérification Cloudflare si le paramètre est activé
- * et si l'utilisateur ne vient pas de la fermer manuellement sur ce domaine.
+ * Triggers the compact Cloudflare verification popup if enabled and the user has
+ * not just manually dismissed it for this domain.
  */
 export async function tryAutoVerifyCloudflarePopup(
   error: CloudflareChallengeError,
@@ -25,15 +26,26 @@ export async function tryAutoVerifyCloudflarePopup(
 }
 
 /**
- * Exécute une opération réseau et ouvre automatiquement la fenêtre de vérification
- * Cloudflare/Captcha si une protection survient, puis relance l'opération dès déblocage.
+ * Executes a network task and automatically runs the Cloudflare/Captcha popup
+ * when needed, retrying cleanly (with a brief stabilization retry) once unlocked.
  */
 export async function runWithAutoCloudflarePopup<T>(task: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now();
   try {
     return await task();
   } catch (err) {
-    if (err instanceof CloudflareChallengeError && (await tryAutoVerifyCloudflarePopup(err))) {
-      return await task();
+    if (err instanceof CloudflareChallengeError) {
+      const unlocked = await tryAutoVerifyCloudflarePopup(err);
+      const unlockedConcurrently = !unlocked && getLastCloudflareUnlockTime(err.url) >= startedAt;
+      if (unlocked || unlockedConcurrently) {
+        try {
+          return await task();
+        } catch {
+          // Give moved/docked tabs a short settle window before one final retry
+          await new Promise((r) => setTimeout(r, 500));
+          return await task();
+        }
+      }
     }
     throw err;
   }

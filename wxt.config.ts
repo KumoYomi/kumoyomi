@@ -1,6 +1,8 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'wxt';
 
+const isAmoListed = process.env.KUMOYOMI_AMO_LISTED === '1';
+
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifestVersion: 3,
@@ -12,7 +14,7 @@ export default defineConfig({
     short_name: 'KumoYomi',
     description:
       '100% local decentralized manga reader and aggregator powered by external JSON source repositories.',
-    version: '0.3.0',
+    version: '0.4.0',
     icons: {
       16: 'icon/16.png',
       32: 'icon/32.png',
@@ -32,17 +34,20 @@ export default defineConfig({
       'storage',
       'unlimitedStorage',
       'alarms',
+      'notifications',
       'scripting',
       'tabs',
       'declarativeNetRequest',
       'declarativeNetRequestWithHostAccess',
     ],
-    host_permissions: ['http://*/*', 'https://*/*'],
+    ...(isAmoListed
+      ? { optional_host_permissions: ['http://*/*', 'https://*/*'] }
+      : { host_permissions: ['http://*/*', 'https://*/*'] }),
     ...(browser === 'firefox'
       ? {
           browser_specific_settings: {
             gecko: {
-              id: 'kumoyomi@local.extension',
+              id: 'kumoyomi@kumoyomi.app',
               strict_min_version: '128.0',
               data_collection_permissions: {
                 required: ['none'],

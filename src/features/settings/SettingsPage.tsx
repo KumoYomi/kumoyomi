@@ -315,6 +315,15 @@ export function SettingsPage() {
             <option value={1440}>{t('settings.every1d')}</option>
           </select>
         </label>
+        <label className="flex cursor-pointer items-start gap-3 pt-1 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            checked={currentSettings.desktopNotifications ?? true}
+            onChange={(e) => void updateSettings({ desktopNotifications: e.target.checked })}
+            className="mt-0.5 accent-rose-500"
+          />
+          <span>{t('settings.desktopNotificationsDesc')}</span>
+        </label>
       </section>
 
       {/* Sauvegarde & Cache local */}
@@ -381,6 +390,16 @@ export function SettingsPage() {
             </button>
           )}
         </div>
+
+        <label className="flex cursor-pointer items-start gap-3 pt-1 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            checked={currentSettings.autoDeleteOfflineOnRead ?? false}
+            onChange={(e) => void updateSettings({ autoDeleteOfflineOnRead: e.target.checked })}
+            className="mt-0.5 accent-rose-500"
+          />
+          <span>{t('settings.autoDeleteOfflineDesc')}</span>
+        </label>
       </section>
     </div>
   );

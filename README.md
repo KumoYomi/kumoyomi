@@ -24,15 +24,17 @@ KumoYomi runs entirely inside your browser as a full-tab MV3 extension (`app.htm
 
 ## Core Features
 
-- **Neutral JSON Parser Engine (`src/core/parser/`)**: Parses HTML (`DOMParser`), REST JSON APIs, and `json-html` endpoints without eval or remote executable code. Supports reusable inheritance templates (`origines`, `madara`, `mangathemesia`).
-- **Library & Automatic Migration**: Track reading statuses (`Reading`, `Plan to read`, `Completed`, `On hold`, `Dropped`), filter by source or unread counts, batch-mark chapters read/unread, and switch or merge series across multiple sources while preserving progress.
+- **Neutral JSON Parser Engine (`src/core/parser/`)**: Parses HTML (`DOMParser`), REST JSON APIs, `json-html` endpoints, and inline `<script>` JSON hydration payloads (`__NEXT_DATA__`, `ts_reader.run`) without eval or remote executable code. Supports reusable inheritance templates (`origines`, `madara`, `mangathemesia`).
+- **Interactive Source Inspector**: Test Catalogue (`Popular`/`Latest`/`Search`), Manga Details, Chapters, and Chapter Pages (with live anti-hotlink Preview & latency readout) right inside **Sources & Repos**.
+- **Library, Custom Categories & Local Stats**: Track reading statuses (`Reading`, `Plan to read`, `Completed`, `On hold`, `Dropped`), organize with custom user-defined categories, filter by source/category/unread counts, view local reading statistics in **Updates & History**, batch-mark chapters read/unread, and merge series across sources.
 - **Full-Screen Reader**:
   - **Webtoon** (vertical continuous scroll with configurable width and gap), **Single Page**, and **Double Page** (open-book spread) modes.
   - **Left-to-Right** and **Right-to-Left (Manga)** reading directions.
-  - Fit presets (`Fit screen`, `Full width`, `Original size`), configurable ahead-of-time page preloading (`0–15` pages), skeleton loading animations, and keyboard shortcuts (`←` / `→`, `Space`, `F`, `M`, `[` / `]`).
-- **100% Offline Chapter Storage**: Download single or unread chapters into IndexedDB and read with zero network requests.
-- **Anti-Hotlink & Cloudflare Session Assist**: Injects compliant per-domain `Referer`/`Origin` headers via MV3 `declarativeNetRequest`, falls back to open-tab fetch when session cookies are partitioned, and optionally opens a compact popup verification window that closes automatically once a site challenge is cleared by the user.
-- **Portable Local Backups**: Export and restore your full library, sources, and history as a JSON file (`Settings → Export backup`).
+  - Fit presets (`Fit screen`, `Full width`, `Original size`), configurable ahead-of-time page preloading (`0–15` pages), skeleton loading animations, and an in-reader **Keyboard Shortcuts Help modal (`?`)** (`←` / `→`, `Space`, `F`, `M`, `[` / `]`, `?`, `Esc`).
+- **100% Offline Chapter Storage & Auto-Cleanup**: Download single or unread chapters into IndexedDB for offline reading, with optional automatic removal once chapters are marked read.
+- **Background Checks & Desktop Notifications**: Scheduled update checks paced per domain with toolbar badge updates and optional local desktop notifications (`browser.notifications`).
+- **Anti-Hotlink & Cloudflare Session Assist**: Injects compliant per-domain `Referer`/`Origin` headers via MV3 `declarativeNetRequest`, keeps a single deduplicated pinned session tab alive for cleared domains (and automatically wakes sleeping tabs), and notifies UI banners immediately once unlocked.
+- **Portable Local Backups & Zero Telemetry**: Export/restore full library, sources, and history as `.json`, backed by our zero-collection policy in [PRIVACY.md](PRIVACY.md).
 
 ---
 
@@ -82,7 +84,7 @@ Pre-built extension archives are published on the [**GitHub Releases**](../../re
    - Click **Load Temporary Add-on…** and select `.output/firefox-mv3/manifest.json` (or the downloaded `.zip`).
    - *Note: Firefox Release removes temporary add-ons on browser restart; use Firefox Developer Edition/Nightly (`xpinstall.signatures.required = false`) or signed AMO `.xpi` packages for persistent installs.*
 2. **Signed distribution via Firefox Add-ons (AMO)**:
-   - See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/ROADMAP.md](docs/ROADMAP.md#1-firefox-amo-store-readiness) for the exact reproducible build command (`pnpm install --frozen-lockfile && pnpm build:firefox`) and remaining store-listing steps.
+   - Use `pnpm build:firefox:amo` (`KUMOYOMI_AMO_LISTED=1`) or `kumoyomi-<version>-firefox-amo-listed.zip` from GitHub Releases for strict `optional_host_permissions` compliance, alongside [PRIVACY.md](PRIVACY.md) and [CONTRIBUTING.md](CONTRIBUTING.md). See [docs/ROADMAP.md](docs/ROADMAP.md#1-firefox-amo-store-readiness).
 
 ### Chrome / Brave / Edge
 
@@ -104,8 +106,9 @@ Read the complete specification in [**docs/ADDING_SOURCES.md**](docs/ADDING_SOUR
 | --- | --- | --- |
 | Standard themes (`origines`, `madara`, `mangathemesia`) | **Easy** | Extend `_templates/<theme>.json` — often 10–30 lines of JSON. |
 | Clean SSR HTML or open REST/JSON APIs | **Easy / Medium** | Use CSS `FieldExtractor` selectors, `responseType: "json"`/`"json-html"`, or `numberedPages`. |
+| `<script>` JSON hydration (`__NEXT_DATA__`, `ts_reader.run`) | **Easy / Medium** | Use `responseType: "json"` with `request.scriptJson` (`selector` / `regex`). |
 | Sites behind Cloudflare / Hotlink protection | **Supported** | Works with `headers`, `warmupUrl`, MV3 DNR `Referer` injection, and user-cleared Cloudflare popup/tab proxy. |
-| Embedded `<script>` JSON blobs (`__NEXT_DATA__`), canvas image descrambling, or AES/HMAC token signing | **Hard / Unsupported** | Requires core parser extensions tracked in [docs/ROADMAP.md](docs/ROADMAP.md). |
+| Canvas image descrambling, AES/HMAC per-request payload signing, or multi-step login tokens | **Hard / Unsupported** | Requires core parser extensions tracked in [docs/ROADMAP.md](docs/ROADMAP.md). |
 
 ### Use an AI Coding Assistant to Add a Source
 
@@ -168,9 +171,10 @@ node tools/mock-manga-servers.mjs --no-hotlink
 pnpm preview:web
 
 # Build browser bundles
-pnpm build:firefox   # -> .output/firefox-mv3
-pnpm build           # -> .output/chrome-mv3
-pnpm zip             # -> .output/*.zip (Chrome & Firefox)
+pnpm build:firefox     # -> .output/firefox-mv3
+pnpm build:firefox:amo # -> .output/firefox-mv3 (optional_host_permissions for AMO Listed)
+pnpm build             # -> .output/chrome-mv3
+pnpm zip               # -> .output/*.zip (Chrome & Firefox)
 ```
 
 ---

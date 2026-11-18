@@ -50,10 +50,11 @@ WordPress and standard scan themes often need **only a small JSON file** extendi
 }
 ```
 
-### Easy / Medium — Custom SSR HTML or Open REST JSON APIs
+### Easy / Medium — Custom SSR HTML, JSON APIs, or `<script>` Hydration
 Supported directly by the built-in engine without writing TypeScript:
 - Server-rendered HTML pages (`responseType: "html"` or omitted) with CSS selectors, regexes, and `replace` rules.
 - REST JSON APIs (`responseType: "json"`) and AJAX HTML-inside-JSON (`responseType: "json-html"` with `jsonHtmlPath`).
+- **Embedded `<script>` JSON hydration** (`window.__NEXT_DATA__`, `__NUXT__`, `ts_reader.run(...)`) using `responseType: "json"` + `request.scriptJson` (`selector` and/or `regex`).
 - `GET` or `POST` requests with `queryParams`, `formBody`, `jsonBody`, and custom `headers`.
 - Sequential / numbered CDN pages via `numberedPages` (supports padding, extension, URL suffix stripping, and dynamic token stripping via `stripTokensFromScript`).
 - Sites needing an initial session cookie via `warmupUrl`, hotlink `Referer`/`Origin` headers (handled via DNR), or Cloudflare human verification (handled automatically via KumoYomi's popup + tab proxy).
@@ -62,10 +63,9 @@ Supported directly by the built-in engine without writing TypeScript:
 These patterns **cannot** be expressed in pure source JSON today:
 1. **Dynamic client-side encryption / AES-encrypted API payloads** or per-request HMAC/timestamp signatures calculated in obfuscated JS.
 2. **HTML canvas tile descrambling / image shuffling** (e.g., DRM slices reassembled onto `<canvas>`).
-3. **Hydration blobs inside `<script>` tags (`window.__NEXT_DATA__`, `__NUXT__`, inline JS arrays)** when extracting multi-item arrays (catalogues, chapter lists, or page lists) if no clean JSON endpoint or HTML selector exists.
-4. **Multi-step dynamic CSRF token logins / GraphQL persisted queries requiring runtime token scraping before each request**.
+3. **Multi-step dynamic CSRF token logins / GraphQL persisted queries requiring runtime token scraping before each request**.
 
-*(See [ROADMAP.md](ROADMAP.md) for upcoming engine enhancements like `__NEXT_DATA__` script-JSON extraction.)*
+*(See [ROADMAP.md](ROADMAP.md) for upcoming long-term items.)*
 
 ---
 
@@ -92,6 +92,25 @@ Exact fields enforced by [`src/core/types/source.ts`](../src/core/types/source.t
 - `jsonBody`: `application/json` body (recursively templated)
 - `responseType`: `"html"` (default), `"json"`, or `"json-html"`
 - `jsonHtmlPath`: Dot path to HTML fragment when `responseType === "json-html"` (e.g., `"data.html"`)
+- `scriptJson`: Extract JSON embedded inside HTML `<script>` tags (`selector` and/or `regex`, used with `responseType: "json"`):
+  - Next.js `__NEXT_DATA__` example:
+    ```json
+    "request": {
+      "method": "GET",
+      "url": "{{mangaUrl}}",
+      "responseType": "json",
+      "scriptJson": { "selector": "script#__NEXT_DATA__" }
+    }
+    ```
+  - Inline script function payload (`ts_reader.run(...)`) example:
+    ```json
+    "request": {
+      "method": "GET",
+      "url": "{{chapterUrl}}",
+      "responseType": "json",
+      "scriptJson": { "regex": "ts_reader\\.run\\((\\{[\\s\\S]*?\\})\\)\\s*;?" }
+    }
+    ```
 
 ### `FieldExtractor`
 Used for both HTML DOM extraction and JSON extraction:
@@ -126,8 +145,8 @@ Used for both HTML DOM extraction and JSON extraction:
 
 1. Open KumoYomi → **Sources & Repos** → **Import JSON (.json)** or **Paste JSON**.
    - Note: if your source uses `"extends": "<template>"`, import the template `_templates/<template>.json` first (or test inside a self-contained `index.json`).
-2. Click **Test** on your source card to verify Popular p.1 extraction.
-3. Click **Explore** → search a title → open a manga detail page → verify cover loading, status, genres, chapter order, dates, and actual page rendering inside the reader.
+2. Click **Test** on your source card to verify Popular p.1 extraction, or click **Inspect** to open the built-in interactive **Source Inspector** (test Popular/Latest/Search, click **Test Details →**, click **Test Pages →**, and inspect latency + live anti-hotlink Page 1 image rendering).
+3. Open **Explore** → search a title → open a manga detail page → verify cover loading, status, genres, chapter order, dates, and actual page rendering inside the reader.
 4. *(When contributing to `KumoYomi-Sources/extensions-source`)* run:
    ```bash
    node scripts/validate-and-build.mjs --check

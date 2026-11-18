@@ -45,6 +45,9 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   preloadPagesCount: 4,
   updateIntervalMinutes: 120,
   autoOpenCloudflarePopup: true,
+  autoDeleteOfflineOnRead: false,
+  desktopNotifications: true,
+  customCategories: [],
 };
 
 export function normalizeMangaKey(title: string): string {

@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { db, normalizeMangaKey } from '@/src/core/db/db';
+import { db, DEFAULT_APP_SETTINGS, normalizeMangaKey } from '@/src/core/db/db';
+import { addCustomCategory, setMangaCategories } from '@/src/core/db/mangaRepository';
 import { LOCALE_OPTIONS, translate } from '@/src/core/i18n';
 import { en } from '@/src/core/i18n/locales/en';
 import { es } from '@/src/core/i18n/locales/es';
@@ -13,8 +14,15 @@ import type { TranslationKey } from '@/src/core/i18n/types';
 import { formatBytes } from '@/src/core/offline/offlineCache';
 import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
-import { UniversalParserEngine } from '@/src/core/parser/engine';
-import { registerInProcessTabProxyHandler } from '@/src/core/extension/browserBridge';
+import { parserEngine, UniversalParserEngine } from '@/src/core/parser/engine';
+import {
+  getLastCloudflareUnlockTime,
+  notifyCloudflareDomainUnlocked,
+  onCloudflareDomainUnlocked,
+  registerInProcessTabProxyHandler,
+} from '@/src/core/extension/browserBridge';
+import { runWithAutoCloudflarePopup } from '@/src/core/extension/cfAutoVerify';
+import * as cfPopup from '@/src/core/extension/cfPopup';
 import {
   clearImageProxyCache,
   fetchImageAsBlobUrl,
@@ -24,12 +32,14 @@ import {
   clearTabProxyCache,
   CloudflareChallengeError,
 } from '@/src/core/parser/httpClient';
+import { removeSource } from '@/src/core/parser/repositoryService';
 import {
   resolveSourceWithTemplates,
   validateRawSourceConfig,
   validateTemplateConfig,
 } from '@/src/core/parser/validator';
 import type { SourceTemplateConfig } from '@/src/core/types/source';
+import { checkLibraryUpdates } from '@/src/core/updater/updateChecker';
 import { convertKeiyoushiDirectory } from '~/tools/mihon-converter/convert.mjs';
 
 function loadFixtureJson<T>(relativePath: string): T {
@@ -852,5 +862,329 @@ describe('KumoYomi Universal Parser & Templates', () => {
     expect(translate('en', 'library.subtitle', { count: 4 })).toContain('4');
     expect(translate('zh', 'library.subtitle', { count: 4 })).toContain('4');
     expect(translate('es', 'library.subtitle', { count: 4 })).toContain('4');
+  });
+
+  it('extrait le JSON embarqué dans <script> (__NEXT_DATA__ & ts_reader.run) avec réutilisation details/chapters', async () => {
+    const scriptSourceRaw = validateRawSourceConfig({
+      id: 'script-hydration-demo',
+      name: 'Script Hydration Demo',
+      lang: 'en',
+      baseUrl: 'https://hydration-demo.example',
+      popular: {
+        request: {
+          method: 'GET',
+          url: '/catalogue?page={{page}}',
+          responseType: 'json',
+          scriptJson: { selector: 'script#__NEXT_DATA__' },
+        },
+        itemsPath: 'props.pageProps.items',
+        fields: {
+          title: { jsonPath: 'name' },
+          url: { jsonPath: 'slug', prefix: '/series/', absoluteUrl: true },
+          cover: { jsonPath: 'cover', absoluteUrl: true },
+        },
+      },
+      mangaDetails: {
+        request: {
+          method: 'GET',
+          url: '{{mangaUrl}}',
+          responseType: 'json',
+          scriptJson: { selector: 'script#__NEXT_DATA__' },
+        },
+        fields: {
+          title: { jsonPath: 'props.pageProps.series.title' },
+          author: { jsonPath: 'props.pageProps.series.author' },
+          status: { jsonPath: 'props.pageProps.series.status' },
+          genres: { jsonPath: 'props.pageProps.series.genres', joinAll: ', ' },
+        },
+      },
+      chapters: {
+        request: {
+          method: 'GET',
+          url: '{{mangaUrl}}',
+          responseType: 'json',
+          scriptJson: { selector: 'script#__NEXT_DATA__' },
+        },
+        itemsPath: 'props.pageProps.series.chapters',
+        fields: {
+          title: { jsonPath: 'title' },
+          url: { jsonPath: 'path', absoluteUrl: true },
+          chapterNumber: { jsonPath: 'number' },
+        },
+      },
+      pages: {
+        request: {
+          method: 'GET',
+          url: '{{chapterUrl}}',
+          responseType: 'json',
+          scriptJson: { regex: 'ts_reader\\.run\\((\\{[\\s\\S]*?\\})\\)\\s*;?' },
+        },
+        itemsPath: 'sources.0.images',
+        imageUrl: { jsonPath: '' },
+      },
+    });
+    const resolved = resolveSourceWithTemplates(scriptSourceRaw, templateMap);
+    const engine = new UniversalParserEngine();
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === 'https://hydration-demo.example/catalogue?page=1') {
+        const nextPayload = {
+          props: { pageProps: { items: [{ name: 'Cloud Reader', slug: 'cloud-reader', cover: '/c.jpg' }] } },
+        };
+        return new Response(
+          `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(nextPayload)}</script></body></html>`,
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        );
+      }
+      if (url === 'https://hydration-demo.example/series/cloud-reader') {
+        const detailPayload = {
+          props: {
+            pageProps: {
+              series: {
+                title: 'Cloud Reader',
+                author: 'Sora K.',
+                status: 'ongoing',
+                genres: ['Action', 'Sci-Fi'],
+                chapters: [{ title: 'Chapter 1', path: '/read/ch-1', number: 1 }],
+              },
+            },
+          },
+        };
+        return new Response(
+          `<html><body><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(detailPayload)}</script></body></html>`,
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        );
+      }
+      if (url === 'https://hydration-demo.example/read/ch-1') {
+        const tsReader = { sources: [{ source: 'CDN1', images: ['https://cdn.example/1.webp', 'https://cdn.example/2.webp'] }] };
+        return new Response(
+          `<html><body><script>var ignored = 1;</script><script>ts_reader.run(${JSON.stringify(tsReader)});</script></body></html>`,
+          { status: 200, headers: { 'content-type': 'text/html' } },
+        );
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const cat = await engine.getPopular(resolved, 1);
+    expect(cat.items).toHaveLength(1);
+    expect(cat.items[0]?.url).toBe('https://hydration-demo.example/series/cloud-reader');
+
+    const details = await engine.getMangaDetails(resolved, cat.items[0]!.url);
+    expect(details.title).toBe('Cloud Reader');
+    expect(details.genres).toEqual(['Action', 'Sci-Fi']);
+
+    const chapters = await engine.getChapters(
+      resolved,
+      details.url,
+      details.rawHtml,
+      details.rawJson,
+    );
+    expect(chapters).toHaveLength(1);
+    expect(chapters[0]?.chapterNumber).toBe(1);
+    // Details and chapters share one HTTP fetch
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const pages = await engine.getChapterPages(resolved, chapters[0]!.url);
+    expect(pages).toHaveLength(2);
+    expect(pages[1]?.imageUrl).toBe('https://cdn.example/2.webp');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('notifie le déblocage Cloudflare aux bannières et stabilise les réessais post-popup', async () => {
+    const unlockedSpy = vi.fn();
+    const unsub = onCloudflareDomainUnlocked('https://cf-site.example', unlockedSpy);
+    notifyCloudflareDomainUnlocked('https://cdn.cf-site.example/page1.jpg');
+    expect(unlockedSpy).toHaveBeenCalledTimes(1);
+    expect(getLastCloudflareUnlockTime('https://cf-site.example')).toBeGreaterThan(0);
+    unsub();
+
+    const g = globalThis as { browser?: unknown };
+    const prevBrowser = g.browser;
+    g.browser = { runtime: { id: 'kumoyomi-test' } };
+    vi.spyOn(db.settings, 'get').mockResolvedValue(DEFAULT_APP_SETTINGS);
+    const popupSpy = vi
+      .spyOn(cfPopup, 'openCloudflareVerificationPopup')
+      .mockResolvedValue({ unlocked: true, mode: 'pinned_tab' });
+
+    let attempts = 0;
+    try {
+      const res = await runWithAutoCloudflarePopup(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new CloudflareChallengeError({
+            sourceId: 'cf-src',
+            sourceName: 'CF Site',
+            url: 'https://cf-site.example',
+            status: 403,
+            reason: 'no_tab',
+          });
+        }
+        if (attempts === 2) {
+          throw new Error('Transient docked tab settle error');
+        }
+        return 'unlocked-ok';
+      });
+      expect(res).toBe('unlocked-ok');
+      expect(attempts).toBe(3);
+      expect(popupSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      g.browser = prevBrowser;
+    }
+  });
+
+  it('alterne les domaines lors de checkLibraryUpdates et court-circuite une source bloquée Cloudflare', async () => {
+    const srcA = {
+      id: 'src-a',
+      repoId: 'r1',
+      name: 'Source A',
+      lang: 'en',
+      baseUrl: 'https://a.example',
+      enabled: true,
+      rawConfig: demoOriginesRaw,
+      resolvedConfig: resolveSourceWithTemplates(
+        { ...demoOriginesRaw, id: 'src-a', baseUrl: 'https://a.example' },
+        templateMap,
+      ),
+      updatedAt: 1,
+    };
+    const srcB = {
+      ...srcA,
+      id: 'src-b',
+      name: 'Source B',
+      baseUrl: 'https://b.example',
+      resolvedConfig: resolveSourceWithTemplates(
+        { ...demoOriginesRaw, id: 'src-b', baseUrl: 'https://b.example' },
+        templateMap,
+      ),
+    };
+
+    const favorites = [
+      { id: 'm1', title: 'A1', favorite: true, preferredSourceId: 'src-a' },
+      { id: 'm2', title: 'A2', favorite: true, preferredSourceId: 'src-a' },
+      { id: 'm3', title: 'B1', favorite: true, preferredSourceId: 'src-b' },
+    ];
+    vi.spyOn(db.mangas, 'filter').mockReturnValue({
+      toArray: async () => favorites,
+    } as never);
+    vi.spyOn(db.sources, 'toArray').mockResolvedValue([srcA, srcB] as never);
+    vi.spyOn(db.mangaSources, 'where').mockImplementation(
+      () =>
+        ({
+          equals: (mangaId: string) => ({
+            toArray: async () => [
+              {
+                id: `ms-${mangaId}`,
+                mangaId,
+                sourceId: mangaId === 'm3' ? 'src-b' : 'src-a',
+                sourceMangaUrl:
+                  mangaId === 'm3'
+                    ? 'https://b.example/m/b1'
+                    : `https://a.example/m/${mangaId}`,
+              },
+            ],
+          }),
+        }) as never,
+    );
+    vi.spyOn(db.settings, 'get').mockResolvedValue(DEFAULT_APP_SETTINGS);
+    vi.spyOn(db.settings, 'put').mockResolvedValue('default' as never);
+    vi.spyOn(db.chapters, 'filter').mockReturnValue({ count: async () => 0 } as never);
+    vi.spyOn(db, 'transaction').mockImplementation(((...args: unknown[]) => {
+      const cb = args[args.length - 1] as () => Promise<unknown>;
+      return cb();
+    }) as never);
+    vi.spyOn(db.mangas, 'get').mockResolvedValue(undefined);
+    vi.spyOn(db.chapters, 'where').mockImplementation(
+      () =>
+        ({
+          equals: () => ({ toArray: async () => [], delete: async () => 0 }),
+        }) as never,
+    );
+    vi.spyOn(db.chapters, 'bulkPut').mockResolvedValue(undefined as never);
+
+    const calledUrls: string[] = [];
+    vi.spyOn(parserEngine, 'getChapters').mockImplementation(async (cfg, url) => {
+      calledUrls.push(`${cfg.id}:${url}`);
+      if (cfg.id === 'src-a') {
+        throw new CloudflareChallengeError({
+          sourceId: 'src-a',
+          sourceName: 'Source A',
+          url: 'https://a.example',
+          requestUrl: url,
+          status: 403,
+        });
+      }
+      return [{ title: 'Chapter 1', url: `${url}/ch1`, chapterNumber: 1 }];
+    });
+
+    const summary = await checkLibraryUpdates(undefined, { minHostIntervalMs: 0 });
+    expect(summary.checkedMangas).toBe(3);
+    // Source A was queried ONCE and short-circuited on its second title; Source B still succeeded
+    expect(calledUrls).toEqual(['src-a:https://a.example/m/m1', 'src-b:https://b.example/m/b1']);
+    expect(summary.errors).toHaveLength(2);
+    expect(summary.errors[0]?.isCloudflare).toBe(true);
+    expect(summary.errors[1]?.isCloudflare).toBe(true);
+  });
+
+  it('supprime le cache hors-ligne via removeSource et gère les catégories personnalisées', async () => {
+    vi.spyOn(db, 'transaction').mockImplementation(((...args: unknown[]) => {
+      const cb = args[args.length - 1] as () => Promise<unknown>;
+      return cb();
+    }) as never);
+    vi.spyOn(db.sources, 'get').mockResolvedValue({
+      id: 'manual-1',
+      repoId: 'local_manual',
+      name: 'Manual',
+      lang: 'en',
+      baseUrl: 'https://manual.example',
+      enabled: true,
+      rawConfig: demoOriginesRaw,
+      resolvedConfig: resolveSourceWithTemplates(demoOriginesRaw, templateMap),
+      updatedAt: 1,
+    });
+    const sourceDeleteSpy = vi.spyOn(db.sources, 'delete').mockResolvedValue(undefined);
+    const offlineDeleteSpy = vi.spyOn(db.offlineChapters, 'delete').mockResolvedValue(undefined);
+    const blobDeleteSpy = vi.fn().mockResolvedValue(1);
+    vi.spyOn(db.offlineChapters, 'where').mockImplementation(
+      () =>
+        ({
+          equals: () => ({ primaryKeys: async () => ['ch-101'] }),
+        }) as never,
+    );
+    vi.spyOn(db.chapterPageBlobs, 'where').mockImplementation(
+      () =>
+        ({
+          equals: () => ({ delete: blobDeleteSpy }),
+        }) as never,
+    );
+    vi.spyOn(db.sources, 'where').mockImplementation(
+      () => ({ equals: () => ({ count: async () => 0 }) }) as never,
+    );
+    vi.spyOn(db.templates, 'where').mockImplementation(
+      () => ({ equals: () => ({ count: async () => 0 }) }) as never,
+    );
+    const repoDeleteSpy = vi.spyOn(db.repositories, 'delete').mockResolvedValue(undefined);
+    vi.spyOn(db.sources, 'toArray').mockResolvedValue([]);
+
+    await removeSource('manual-1');
+    expect(sourceDeleteSpy).toHaveBeenCalledWith('manual-1');
+    expect(blobDeleteSpy).toHaveBeenCalledTimes(1);
+    expect(offlineDeleteSpy).toHaveBeenCalledWith('ch-101');
+    expect(repoDeleteSpy).toHaveBeenCalledWith('local_manual');
+
+    vi.spyOn(db.settings, 'get').mockResolvedValue({ ...DEFAULT_APP_SETTINGS, customCategories: [] });
+    const putSettingsSpy = vi.spyOn(db.settings, 'put').mockResolvedValue('default' as never);
+    const mangaUpdateSpy = vi.spyOn(db.mangas, 'update').mockResolvedValue(1);
+
+    const cats = await addCustomCategory('  Action  ');
+    expect(cats).toEqual(['Action']);
+    expect(putSettingsSpy).toHaveBeenCalled();
+
+    await setMangaCategories('m1', ['Action', 'action', 'Favorites', '']);
+    expect(mangaUpdateSpy).toHaveBeenCalledWith(
+      'm1',
+      expect.objectContaining({ categories: ['Action', 'Favorites'] }),
+    );
   });
 });

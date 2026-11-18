@@ -18,10 +18,16 @@ export function UpdateCheckStatusBanner({
 }: UpdateCheckStatusBannerProps) {
   const { t } = useTranslation();
 
-  // Déduplique les alertes Cloudflare par sourceId lors des vérifications groupées
-  const uniqueCfSources = summary
+  // Deduplicate Cloudflare alerts by sourceId while keeping first probeUrl
+  const uniqueCfErrors = summary
     ? Array.from(
-        new Set(summary.errors.filter((e) => e.isCloudflare).map((e) => e.sourceId)),
+        summary.errors
+          .filter((e) => e.isCloudflare)
+          .reduce((map, err) => {
+            if (!map.has(err.sourceId)) map.set(err.sourceId, err);
+            return map;
+          }, new Map<string, UpdateCheckSummary['errors'][number]>())
+          .values(),
       )
     : [];
 
@@ -41,14 +47,15 @@ export function UpdateCheckStatusBanner({
             <strong>{t('updateBanner.newCount', { count: summary.newChaptersCount })}</strong>{' '}
             {t('updateBanner.detected')}
           </div>
-          {uniqueCfSources.map((sourceId) => {
-            const src = sourceById.get(sourceId);
+          {uniqueCfErrors.map((err) => {
+            const src = sourceById.get(err.sourceId);
             if (!src) return null;
             return (
               <CloudflareBanner
-                key={sourceId}
+                key={err.sourceId}
                 sourceName={src.name}
                 url={src.baseUrl}
+                probeUrl={err.probeUrl}
                 compact
                 onRetry={onRetry}
               />
