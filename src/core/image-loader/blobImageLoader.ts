@@ -12,6 +12,26 @@ const preferredImageProxyHosts = new Map<string, number>();
 
 const MAX_COVER_CACHE_ENTRIES = 160;
 const IMAGE_PROXY_TTL_MS = 5 * 60 * 1000;
+const MAX_CONCURRENT_IMAGE_FETCHES = 3;
+
+let activeImageFetches = 0;
+const imageFetchWaiters: Array<() => void> = [];
+
+async function withImageConcurrency<T>(task: () => Promise<T>): Promise<T> {
+  if (activeImageFetches >= MAX_CONCURRENT_IMAGE_FETCHES) {
+    await new Promise<void>((resolve) => {
+      imageFetchWaiters.push(resolve);
+    });
+  }
+  activeImageFetches += 1;
+  try {
+    return await task();
+  } finally {
+    activeImageFetches -= 1;
+    const next = imageFetchWaiters.shift();
+    if (next) next();
+  }
+}
 
 export function clearImageProxyCache(): void {
   preferredImageProxyHosts.clear();
@@ -34,13 +54,22 @@ function safeHost(url: string): string {
   }
 }
 
-function decodeBase64ToBlob(base64: string, contentType?: string): Blob {
+async function decodeBase64ToBlob(base64: string, contentType?: string): Promise<Blob> {
+  const mime = contentType || 'image/jpeg';
+  try {
+    const res = await fetch(`data:${mime};base64,${base64}`);
+    if (res.ok) {
+      return await res.blob();
+    }
+  } catch {
+    // Repli synchrone si les data-URLs ne sont pas supportées par fetch (ex: jsdom)
+  }
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return new Blob([bytes], { type: contentType || 'image/jpeg' });
+  return new Blob([bytes], { type: mime });
 }
 
 async function tryFetchImageViaTab(imageUrl: string, refererUrl?: string): Promise<Blob | null> {
@@ -130,21 +159,19 @@ export async function fetchImageAsBlobUrl(
 
       await ensureReferer(trimmed, refererUrl);
 
-      const imgHost = safeHost(trimmed);
-      const cachedProxyUntil = imgHost ? preferredImageProxyHosts.get(imgHost) : undefined;
-      let blob: Blob | undefined;
+      const blob = await withImageConcurrency(async () => {
+        const imgHost = safeHost(trimmed);
+        const cachedProxyUntil = imgHost ? preferredImageProxyHosts.get(imgHost) : undefined;
 
-      if (cachedProxyUntil && cachedProxyUntil > Date.now()) {
-        const proxiedBlob = await tryFetchImageViaTab(trimmed, refererUrl);
-        if (proxiedBlob) {
-          preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
-          blob = proxiedBlob;
-        } else {
+        if (cachedProxyUntil && cachedProxyUntil > Date.now()) {
+          const proxiedBlob = await tryFetchImageViaTab(trimmed, refererUrl);
+          if (proxiedBlob) {
+            preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
+            return proxiedBlob;
+          }
           preferredImageProxyHosts.delete(imgHost);
         }
-      }
 
-      if (!blob) {
         const response = await fetch(trimmed, {
           credentials: 'include',
         });
@@ -164,16 +191,14 @@ export async function fetchImageAsBlobUrl(
               if (imgHost) {
                 preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
               }
-              blob = proxiedBlob;
+              return proxiedBlob;
             }
           }
-          if (!blob) {
-            throw new Error(`HTTP ${response.status} sur l'image`);
-          }
-        } else {
-          blob = await response.blob();
+          throw new Error(`HTTP ${response.status} sur l'image`);
         }
-      }
+
+        return response.blob();
+      });
 
       if (!blob || blob.size === 0) {
         throw new Error('Image vide reçue');

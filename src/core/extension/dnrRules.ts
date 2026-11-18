@@ -6,6 +6,9 @@ const CORS_RULE_ID_START = 30_000;
 const SESSION_IMAGE_MAP_KEY = 'kumoyomi_dnr_image_hosts';
 const SESSION_CORS_MAP_KEY = 'kumoyomi_dnr_cors_pairs';
 
+const ensuredImageHostCache = new Map<string, string>();
+const ensuredCorsPairCache = new Set<string>();
+
 type DnrRule = Parameters<
   typeof browser.declarativeNetRequest.updateSessionRules
 >[0]['addRules'] extends Array<infer R> | undefined
@@ -127,6 +130,11 @@ export async function ensureImageRefererDnrRule(
     return;
   }
 
+  const normalizedHost = imageHost.toLowerCase();
+  if (ensuredImageHostCache.get(normalizedHost) === cleanRefererOrigin) {
+    return;
+  }
+
   const storageArea = browser.storage.session ?? browser.storage.local;
   const stored = await storageArea.get(SESSION_IMAGE_MAP_KEY);
   const hostMap =
@@ -135,6 +143,7 @@ export async function ensureImageRefererDnrRule(
 
   const existingEntry = hostMap[imageHost];
   if (existingEntry && existingEntry.referer === cleanRefererOrigin) {
+    ensuredImageHostCache.set(normalizedHost, cleanRefererOrigin);
     return;
   }
 
@@ -158,13 +167,14 @@ export async function ensureImageRefererDnrRule(
       ],
     },
     condition: {
-      urlFilter: `||${imageHost.toLowerCase()}/`,
+      urlFilter: `||${normalizedHost}/`,
       ...(initiator ? { initiatorDomains: [initiator] } : {}),
       resourceTypes: ['xmlhttprequest', 'image', 'other'],
     },
   };
 
   await applySessionRules([ruleId], [rule]);
+  ensuredImageHostCache.set(normalizedHost, cleanRefererOrigin);
   hostMap[imageHost] = { id: ruleId, referer: cleanRefererOrigin };
   await storageArea.set({ [SESSION_IMAGE_MAP_KEY]: hostMap });
 }
@@ -195,11 +205,16 @@ export async function ensureCrossSubdomainCorsDnrRule(
   }
 
   const pairKey = `${cleanTargetHost}::${cleanTabOrigin}`;
+  if (ensuredCorsPairCache.has(pairKey)) {
+    return;
+  }
+
   const storageArea = browser.storage.session ?? browser.storage.local;
   const stored = await storageArea.get(SESSION_CORS_MAP_KEY);
   const pairMap = (stored[SESSION_CORS_MAP_KEY] as Record<string, number> | undefined) ?? {};
 
   if (pairMap[pairKey] !== undefined) {
+    ensuredCorsPairCache.add(pairKey);
     return;
   }
 
@@ -228,6 +243,7 @@ export async function ensureCrossSubdomainCorsDnrRule(
   };
 
   await applySessionRules([ruleId], [rule]);
+  ensuredCorsPairCache.add(pairKey);
   pairMap[pairKey] = ruleId;
   await storageArea.set({ [SESSION_CORS_MAP_KEY]: pairMap });
 }

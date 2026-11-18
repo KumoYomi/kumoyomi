@@ -617,9 +617,10 @@ describe('KumoYomi Universal Parser & Templates', () => {
       'reader-test',
     );
 
+    const httpsCalls = directFetch.mock.calls.filter(([u]) => String(u).startsWith('https://'));
     expect(blob1.startsWith('blob:')).toBe(true);
     expect(blob2.startsWith('blob:')).toBe(true);
-    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(httpsCalls).toHaveLength(1);
     expect(proxyHandler).toHaveBeenCalledTimes(2);
     expect(createObjectUrlSpy).toHaveBeenCalledTimes(2);
   });

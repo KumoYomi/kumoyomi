@@ -12,7 +12,7 @@ import {
   Rows3,
   SlidersHorizontal,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { navigate } from '@/src/app/router';
 import { AntiHotlinkImage } from '@/src/components/AntiHotlinkImage';
 import { CloudflareBanner } from '@/src/components/CloudflareBanner';
@@ -30,6 +30,68 @@ import type { ParsedPageItem } from '@/src/core/types/source';
 interface ReaderPageProps {
   mangaId: string;
   chapterId: string;
+}
+
+interface LazyWebtoonPageProps {
+  page: ParsedPageItem;
+  index: number;
+  referer?: string;
+  scopeId: string;
+  registerRef: (el: HTMLDivElement | null) => void;
+}
+
+function LazyWebtoonPage({
+  page,
+  index,
+  referer,
+  scopeId,
+  registerRef,
+}: LazyWebtoonPageProps) {
+  const [shouldLoad, setShouldLoad] = useState(index <= 2);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (shouldLoad) return;
+    const node = containerRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '900px 0px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  return (
+    <div
+      ref={(el) => {
+        containerRef.current = el;
+        registerRef(el);
+      }}
+      data-page-index={index}
+      className="webtoon-page-item w-full"
+    >
+      {shouldLoad ? (
+        <AntiHotlinkImage
+          src={page.imageUrl}
+          referer={referer}
+          scopeId={scopeId}
+          alt={`Planche ${index + 1}`}
+          showRetry
+          placeholderClassName="mx-auto min-h-[65vh] w-full rounded-lg"
+          className="mx-auto block w-full object-contain"
+        />
+      ) : (
+        <div className="mx-auto min-h-[65vh] w-full rounded-lg bg-zinc-900/40" />
+      )}
+    </div>
+  );
 }
 
 export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
@@ -73,6 +135,26 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
   const scopeId = `chapter_${chapterId}`;
   const webtoonRefs = useRef<Array<HTMLDivElement | null>>([]);
   const restoredChapterRef = useRef<string>('');
+  const loadedKeyRef = useRef<string>('');
+  const lastRecordedProgressRef = useRef<string>('');
+  const [reloadNonce, setReloadNonce] = useState<number>(0);
+
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+  const chapterRef = useRef(chapter);
+  chapterRef.current = chapter;
+
+  const sourceId = source?.id;
+  const sourceChapterUrl = chapter?.sourceChapterUrl;
+
+  useEffect(() => {
+    setPages([]);
+    setPageError(null);
+    setLoadingPages(true);
+    setCurrentPage(0);
+    loadedKeyRef.current = '';
+    lastRecordedProgressRef.current = '';
+  }, [chapterId]);
 
   useEffect(() => {
     if (settingsInitializedRef.current || !savedSettings) return;
@@ -102,108 +184,68 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
       ? orderedAscChapters[currentChapterIdx + 1]
       : undefined;
 
-  const loadPages = useCallback(async () => {
-    if (!source || !chapter) return;
+  useEffect(() => {
+    const activeSource = sourceRef.current;
+    const activeChapter = chapterRef.current;
+    if (!activeSource || !activeChapter || !sourceChapterUrl) return;
+
+    const loadKey = `${chapterId}::${sourceId}::${sourceChapterUrl}::${reloadNonce}`;
+    if (loadedKeyRef.current === loadKey) return;
+    loadedKeyRef.current = loadKey;
+
+    let cancelled = false;
     setLoadingPages(true);
     setPageError(null);
     setPages([]);
-    try {
-      const result = await parserEngine.getChapterPages(
-        source.resolvedConfig,
-        chapter.sourceChapterUrl,
-      );
-      if (result.length === 0) {
-        setPageError({
-          kind: 'error',
-          message: 'Aucune planche trouvée dans ce chapitre.',
-        });
-      } else {
-        setPages(result);
-        if (restoredChapterRef.current !== chapterId) {
-          restoredChapterRef.current = chapterId;
-          const initial =
-            chapter.lastPageRead > 0 && chapter.lastPageRead < result.length
-              ? chapter.lastPageRead
-              : 0;
-          setCurrentPage(initial);
-          if (initial === 0) {
-            window.scrollTo({ top: 0 });
-          }
-        }
-      }
-    } catch (err) {
-      if (err instanceof CloudflareChallengeError) {
-        setPageError({ kind: 'cloudflare', url: err.url });
-      } else {
-        setPageError({
-          kind: 'error',
-          message: err instanceof Error ? err.message : 'Erreur lors du chargement des pages.',
-        });
-      }
-    } finally {
-      setLoadingPages(false);
-    }
-  }, [source, chapter, chapterId]);
 
-  useEffect(() => {
-    void loadPages();
-  }, [loadPages]);
-
-  // Préchargement glissant des 3 planches suivantes en Blob local
-  useEffect(() => {
-    if (!source || pages.length === 0) return;
-    const ahead = pages.slice(currentPage, currentPage + 4);
-    for (const p of ahead) {
-      void fetchImageAsBlobUrl(p.imageUrl, source.baseUrl, scopeId).catch(() => {});
-    }
-  }, [currentPage, pages, source, scopeId]);
-
-  // Enregistrement automatique de la progression
-  useEffect(() => {
-    if (!chapter || pages.length === 0) return;
-    const isLast =
-      readerMode === 'double'
-        ? currentPage >= pages.length - 2
-        : currentPage >= pages.length - 1;
-
-    void recordChapterProgress({
-      mangaId,
-      chapterId: chapter.id,
-      sourceId: chapter.sourceId,
-      pageIndex: currentPage,
-      totalPages: pages.length,
-      markRead: isLast,
-    });
-  }, [currentPage, pages.length, chapter?.id, chapter?.sourceId, mangaId, readerMode]);
-
-  // Suivi de la page visible en mode Webtoon
-  useEffect(() => {
-    if (readerMode !== 'webtoon' || pages.length === 0) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        let bestIdx = -1;
-        let bestRatio = 0;
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.intersectionRatio >= bestRatio) {
-            const idx = Number((entry.target as HTMLElement).dataset.pageIndex);
-            if (!Number.isNaN(idx)) {
-              bestRatio = entry.intersectionRatio;
-              bestIdx = idx;
+    void (async () => {
+      try {
+        const result = await parserEngine.getChapterPages(
+          activeSource.resolvedConfig,
+          sourceChapterUrl,
+        );
+        if (cancelled) return;
+        if (result.length === 0) {
+          setPageError({
+            kind: 'error',
+            message: 'Aucune planche trouvée dans ce chapitre.',
+          });
+        } else {
+          setPages(result);
+          if (restoredChapterRef.current !== chapterId) {
+            restoredChapterRef.current = chapterId;
+            const initial =
+              activeChapter.lastPageRead > 0 && activeChapter.lastPageRead < result.length
+                ? activeChapter.lastPageRead
+                : 0;
+            setCurrentPage(initial);
+            if (initial === 0) {
+              window.scrollTo({ top: 0 });
             }
           }
         }
-        if (bestIdx >= 0) {
-          setCurrentPage(bestIdx);
+      } catch (err) {
+        if (cancelled) return;
+        loadedKeyRef.current = '';
+        if (err instanceof CloudflareChallengeError) {
+          setPageError({ kind: 'cloudflare', url: err.url });
+        } else {
+          setPageError({
+            kind: 'error',
+            message: err instanceof Error ? err.message : 'Erreur lors du chargement des pages.',
+          });
         }
-      },
-      { threshold: [0.25, 0.55] },
-    );
+      } finally {
+        if (!cancelled) {
+          setLoadingPages(false);
+        }
+      }
+    })();
 
-    for (const node of webtoonRefs.current) {
-      if (node) observer.observe(node);
-    }
-    return () => observer.disconnect();
-  }, [readerMode, pages.length]);
+    return () => {
+      cancelled = true;
+    };
+  }, [chapterId, sourceId, sourceChapterUrl, reloadNonce]);
 
   const spreads = useMemo(() => {
     if (pages.length === 0) return [];
@@ -226,6 +268,91 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     const idx = spreads.findIndex((g) => g.some((p) => p.index === currentPage));
     return idx >= 0 ? idx : 0;
   }, [spreads, currentPage]);
+
+  // Préchargement glissant des prochaines planches (Webtoon utilise LazyWebtoonPage)
+  useEffect(() => {
+    if (!source || pages.length === 0 || readerMode === 'webtoon') return;
+    const ahead = pages.slice(currentPage, currentPage + 4);
+    for (const p of ahead) {
+      void fetchImageAsBlobUrl(p.imageUrl, source.baseUrl, scopeId).catch(() => {});
+    }
+  }, [currentPage, pages, source, scopeId, readerMode]);
+
+  // Enregistrement automatique de la progression sans re-déclencher loadPages
+  useEffect(() => {
+    if (!chapterId || !sourceId || pages.length === 0) return;
+    const isLast =
+      readerMode === 'double'
+        ? currentSpreadIndex >= spreads.length - 1
+        : currentPage >= pages.length - 1;
+
+    const progressKey = `${chapterId}::${currentPage}::${pages.length}::${isLast}`;
+    if (lastRecordedProgressRef.current === progressKey) return;
+    lastRecordedProgressRef.current = progressKey;
+
+    void recordChapterProgress({
+      mangaId,
+      chapterId,
+      sourceId,
+      pageIndex: currentPage,
+      totalPages: pages.length,
+      markRead: isLast,
+    });
+  }, [currentPage, currentSpreadIndex, spreads.length, pages.length, chapterId, sourceId, mangaId, readerMode]);
+
+  // Suivi de la page visible en mode Webtoon
+  useEffect(() => {
+    if (readerMode !== 'webtoon' || pages.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let bestIdx = -1;
+        let bestRatio = 0;
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.intersectionRatio >= bestRatio) {
+            const idx = Number((entry.target as HTMLElement).dataset.pageIndex);
+            if (!Number.isNaN(idx)) {
+              bestRatio = entry.intersectionRatio;
+              bestIdx = idx;
+            }
+          }
+        }
+        if (bestIdx >= 0) {
+          setCurrentPage((prev) => (prev === bestIdx ? prev : bestIdx));
+        }
+      },
+      { threshold: [0.25, 0.55] },
+    );
+
+    for (const node of webtoonRefs.current) {
+      if (node) observer.observe(node);
+    }
+    return () => observer.disconnect();
+  }, [readerMode, pages.length]);
+
+  const switchReaderMode = useCallback((nextMode: ReaderMode) => {
+    setReaderMode(nextMode);
+    void (async () => {
+      const current = await getOrCreateSettings();
+      await db.settings.put({ ...current, readerMode: nextMode });
+    })();
+    if (nextMode !== 'webtoon') {
+      window.scrollTo({ top: 0 });
+    }
+  }, []);
+
+  const canGoPrevPage =
+    readerMode === 'single'
+      ? currentPage > 0 || Boolean(prevChapter)
+      : readerMode === 'double'
+        ? currentSpreadIndex > 0 || Boolean(prevChapter)
+        : true;
+
+  const canGoNextPage =
+    readerMode === 'single'
+      ? currentPage < pages.length - 1 || Boolean(nextChapter)
+      : readerMode === 'double'
+        ? currentSpreadIndex < spreads.length - 1 || Boolean(nextChapter)
+        : true;
 
   const goStep = useCallback(
     (delta: number) => {
@@ -268,6 +395,22 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     ],
   );
 
+  const handleStageClick = useCallback(
+    (e: MouseEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest('button, a, input, select')) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const ratio = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+      if (ratio < 0.3) {
+        goStep(direction === 'rtl' ? 1 : -1);
+      } else if (ratio > 0.7) {
+        goStep(direction === 'rtl' ? -1 : 1);
+      } else {
+        setShowHud((v) => !v);
+      }
+    },
+    [direction, goStep],
+  );
+
   const toggleFullscreen = useCallback(async () => {
     if (!document.fullscreenElement) {
       await document.documentElement.requestFullscreen().catch(() => {});
@@ -301,9 +444,9 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
         void toggleFullscreen();
       } else if (e.key.toLowerCase() === 'm') {
         e.preventDefault();
-        setReaderMode((prev) =>
-          prev === 'webtoon' ? 'single' : prev === 'single' ? 'double' : 'webtoon',
-        );
+        const nextMode: ReaderMode =
+          readerMode === 'webtoon' ? 'single' : readerMode === 'single' ? 'double' : 'webtoon';
+        switchReaderMode(nextMode);
       } else if (e.key === '[' && prevChapter) {
         navigate({ name: 'reader', mangaId, chapterId: prevChapter.id });
       } else if (e.key === ']' && nextChapter) {
@@ -314,7 +457,16 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [goStep, direction, toggleFullscreen, prevChapter, nextChapter, mangaId]);
+  }, [
+    goStep,
+    direction,
+    toggleFullscreen,
+    prevChapter,
+    nextChapter,
+    mangaId,
+    readerMode,
+    switchReaderMode,
+  ]);
 
   async function persistReaderPref(
     patch: Partial<{
@@ -401,10 +553,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             <div className="flex items-center rounded-xl border border-zinc-800 bg-zinc-950 p-0.5 text-xs">
               <button
                 type="button"
-                onClick={() => {
-                  setReaderMode('webtoon');
-                  void persistReaderPref({ readerMode: 'webtoon' });
-                }}
+                onClick={() => switchReaderMode('webtoon')}
                 className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 font-medium ${
                   readerMode === 'webtoon' ? 'bg-rose-600 text-white' : 'text-zinc-400'
                 }`}
@@ -414,10 +563,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setReaderMode('single');
-                  void persistReaderPref({ readerMode: 'single' });
-                }}
+                onClick={() => switchReaderMode('single')}
                 className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 font-medium ${
                   readerMode === 'single' ? 'bg-rose-600 text-white' : 'text-zinc-400'
                 }`}
@@ -427,10 +573,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setReaderMode('double');
-                  void persistReaderPref({ readerMode: 'double' });
-                }}
+                onClick={() => switchReaderMode('double')}
                 className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 font-medium ${
                   readerMode === 'double' ? 'bg-rose-600 text-white' : 'text-zinc-400'
                 }`}
@@ -550,7 +693,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             <CloudflareBanner
               sourceName={source.name}
               url={pageError.url}
-              onRetry={() => void loadPages()}
+              onRetry={() => setReloadNonce((n) => n + 1)}
             />
           </div>
         )}
@@ -565,91 +708,88 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
 
         {!loadingPages && !pageError && pages.length > 0 && readerMode === 'webtoon' && (
           <div
-            onClick={() => setShowHud((v) => !v)}
+            onClick={(e) => {
+              if ((e.target as HTMLElement).closest('button, a, input')) return;
+              setShowHud((v) => !v);
+            }}
             className="mx-auto flex flex-col items-center px-2"
             style={{ maxWidth: `${webtoonWidth}px` }}
           >
             {pages.map((p, idx) => (
-              <div
+              <LazyWebtoonPage
                 key={p.imageUrl}
-                ref={(el) => {
+                page={p}
+                index={idx}
+                referer={source?.baseUrl}
+                scopeId={scopeId}
+                registerRef={(el) => {
                   webtoonRefs.current[idx] = el;
                 }}
-                data-page-index={idx}
-                className="webtoon-page-item w-full"
-              >
-                <AntiHotlinkImage
-                  src={p.imageUrl}
-                  referer={source?.baseUrl}
-                  scopeId={scopeId}
-                  alt={`Planche ${idx + 1}`}
-                  showRetry
-                  className="mx-auto block min-h-[260px] w-full object-contain"
-                />
-              </div>
+              />
             ))}
           </div>
         )}
 
-        {!loadingPages && !pageError && pages.length > 0 && readerMode === 'single' && (
-          <div className="relative flex min-h-[calc(100vh-8rem)] items-center justify-center px-4">
-            <div
+        {!loadingPages && !pageError && pages.length > 0 && readerMode !== 'webtoon' && (
+          <div
+            onClick={handleStageClick}
+            className="relative flex min-h-[calc(100vh-8.5rem)] items-center justify-center px-14"
+          >
+            <button
+              type="button"
+              disabled={direction === 'rtl' ? !canGoNextPage : !canGoPrevPage}
               onClick={() => goStep(direction === 'rtl' ? 1 : -1)}
-              className="absolute inset-y-0 left-0 z-10 w-1/3 cursor-w-resize"
-            />
-            <div
-              onClick={() => setShowHud((v) => !v)}
-              className="absolute inset-y-0 left-1/3 z-10 w-1/3 cursor-pointer"
-            />
-            <div
-              onClick={() => goStep(direction === 'rtl' ? -1 : 1)}
-              className="absolute inset-y-0 right-0 z-10 w-1/3 cursor-e-resize"
-            />
-
-            <AntiHotlinkImage
-              key={pages[currentPage]?.imageUrl}
-              src={pages[currentPage]?.imageUrl}
-              referer={source?.baseUrl}
-              scopeId={scopeId}
-              alt={`Planche ${currentPage + 1}`}
-              showRetry
-              className="max-h-[calc(100vh-8.5rem)] max-w-full rounded object-contain shadow-2xl"
-            />
-          </div>
-        )}
-
-        {!loadingPages && !pageError && pages.length > 0 && readerMode === 'double' && (
-          <div className="relative flex min-h-[calc(100vh-8rem)] items-center justify-center px-4">
-            <div
-              onClick={() => goStep(direction === 'rtl' ? 1 : -1)}
-              className="absolute inset-y-0 left-0 z-10 w-1/3 cursor-w-resize"
-            />
-            <div
-              onClick={() => setShowHud((v) => !v)}
-              className="absolute inset-y-0 left-1/3 z-10 w-1/3 cursor-pointer"
-            />
-            <div
-              onClick={() => goStep(direction === 'rtl' ? -1 : 1)}
-              className="absolute inset-y-0 right-0 z-10 w-1/3 cursor-e-resize"
-            />
-
-            <div
-              className={`flex items-center justify-center gap-1 ${
-                direction === 'rtl' ? 'flex-row-reverse' : 'flex-row'
-              }`}
+              aria-label={direction === 'rtl' ? 'Page suivante' : 'Page précédente'}
+              title={direction === 'rtl' ? 'Page suivante (←)' : 'Page précédente (←)'}
+              className="fixed left-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-zinc-700/80 bg-zinc-900/85 p-3 text-zinc-100 shadow-lg backdrop-blur transition hover:border-rose-500 hover:bg-rose-600 disabled:pointer-events-none disabled:opacity-25"
             >
-              {(spreads[currentSpreadIndex] ?? []).map((p) => (
-                <AntiHotlinkImage
-                  key={p.imageUrl}
-                  src={p.imageUrl}
-                  referer={source?.baseUrl}
-                  scopeId={scopeId}
-                  alt={`Planche ${p.index + 1}`}
-                  showRetry
-                  className="max-h-[calc(100vh-8.5rem)] max-w-[48vw] rounded object-contain shadow-2xl"
-                />
-              ))}
-            </div>
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+
+            <button
+              type="button"
+              disabled={direction === 'rtl' ? !canGoPrevPage : !canGoNextPage}
+              onClick={() => goStep(direction === 'rtl' ? -1 : 1)}
+              aria-label={direction === 'rtl' ? 'Page précédente' : 'Page suivante'}
+              title={direction === 'rtl' ? 'Page précédente (→)' : 'Page suivante (→)'}
+              className="fixed right-3 top-1/2 z-20 -translate-y-1/2 rounded-full border border-zinc-700/80 bg-zinc-900/85 p-3 text-zinc-100 shadow-lg backdrop-blur transition hover:border-rose-500 hover:bg-rose-600 disabled:pointer-events-none disabled:opacity-25"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+
+            {readerMode === 'single' && (
+              <AntiHotlinkImage
+                key={pages[currentPage]?.imageUrl}
+                src={pages[currentPage]?.imageUrl}
+                referer={source?.baseUrl}
+                scopeId={scopeId}
+                alt={`Planche ${currentPage + 1}`}
+                showRetry
+                placeholderClassName="h-[68vh] w-[min(85vw,680px)] rounded-xl"
+                className="max-h-[calc(100vh-9.5rem)] max-w-full rounded object-contain shadow-2xl"
+              />
+            )}
+
+            {readerMode === 'double' && (
+              <div
+                className={`flex max-w-full flex-nowrap items-center justify-center gap-2 ${
+                  direction === 'rtl' ? 'flex-row-reverse' : 'flex-row'
+                }`}
+              >
+                {(spreads[currentSpreadIndex] ?? []).map((p) => (
+                  <AntiHotlinkImage
+                    key={p.imageUrl}
+                    src={p.imageUrl}
+                    referer={source?.baseUrl}
+                    scopeId={scopeId}
+                    alt={`Planche ${p.index + 1}`}
+                    showRetry
+                    placeholderClassName="h-[68vh] w-[42vw] max-w-[540px] rounded-xl"
+                    className="max-h-[calc(100vh-9.5rem)] max-w-[45vw] w-auto rounded object-contain shadow-2xl"
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -682,13 +822,35 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
       {/* Barre inférieure de progression */}
       {pages.length > 0 && (
         <footer
-          className={`fixed inset-x-0 bottom-0 z-30 border-t border-zinc-800/80 bg-[#0b0b10]/95 px-6 py-2.5 backdrop-blur-md transition-transform duration-200 ${
+          className={`fixed inset-x-0 bottom-0 z-30 border-t border-zinc-800/80 bg-[#0b0b10]/95 px-4 py-2.5 backdrop-blur-md transition-transform duration-200 ${
             showHud ? 'translate-y-0' : 'translate-y-full'
           }`}
         >
-          <div className="mx-auto flex max-w-4xl items-center gap-4 text-xs">
-            <span className="w-24 shrink-0 font-mono text-zinc-400">
-              Page {currentPage + 1} / {pages.length}
+          <div className="mx-auto flex max-w-4xl items-center gap-3 text-xs">
+            {readerMode !== 'webtoon' && (
+              <button
+                type="button"
+                disabled={!canGoPrevPage}
+                onClick={() => goStep(-1)}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-35"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Préc.
+              </button>
+            )}
+            <span className="min-w-[6.5rem] shrink-0 text-center font-mono text-zinc-400">
+              {(() => {
+                if (readerMode === 'double') {
+                  const spread = spreads[currentSpreadIndex] ?? [];
+                  if (spread.length >= 2) {
+                    return `Pages ${spread[0]!.index + 1}–${spread[spread.length - 1]!.index + 1} / ${pages.length}`;
+                  }
+                  if (spread.length === 1) {
+                    return `Page ${spread[0]!.index + 1} / ${pages.length}`;
+                  }
+                }
+                return `Page ${currentPage + 1} / ${pages.length}`;
+              })()}
             </span>
             <input
               type="range"
@@ -704,6 +866,17 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
               }}
               className="flex-1 accent-rose-500"
             />
+            {readerMode !== 'webtoon' && (
+              <button
+                type="button"
+                disabled={!canGoNextPage}
+                onClick={() => goStep(1)}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1 font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-35"
+              >
+                Suiv.
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </footer>
       )}

@@ -8,6 +8,7 @@ interface AntiHotlinkImageProps {
   scopeId?: string;
   alt: string;
   className?: string;
+  placeholderClassName?: string;
   showRetry?: boolean;
   onImageLoad?: () => void;
 }
@@ -18,6 +19,7 @@ export function AntiHotlinkImage({
   scopeId = 'covers',
   alt,
   className = '',
+  placeholderClassName,
   showRetry = false,
   onImageLoad,
 }: AntiHotlinkImageProps) {
@@ -60,10 +62,12 @@ export function AntiHotlinkImage({
     };
   }, [src, referer, scopeId, attempt]);
 
+  const boxClass = placeholderClassName ?? className;
+
   if (!src) {
     return (
       <div
-        className={`flex flex-col items-center justify-center bg-zinc-900/90 text-zinc-600 ${className}`}
+        className={`flex flex-col items-center justify-center bg-zinc-900/90 text-zinc-600 ${boxClass}`}
       >
         <ImageOff className="h-6 w-6 opacity-60" />
       </div>
@@ -73,7 +77,7 @@ export function AntiHotlinkImage({
   if (loading) {
     return (
       <div
-        className={`animate-pulse bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-zinc-800/60 ${className}`}
+        className={`animate-pulse bg-gradient-to-br from-zinc-800/80 via-zinc-900 to-zinc-800/60 ${boxClass}`}
       />
     );
   }
@@ -83,7 +87,7 @@ export function AntiHotlinkImage({
   if (error || !resolvedSrc) {
     return (
       <div
-        className={`flex flex-col items-center justify-center gap-2 bg-zinc-900/90 p-3 text-center text-xs text-zinc-500 ${className}`}
+        className={`flex flex-col items-center justify-center gap-2 bg-zinc-900/90 p-3 text-center text-xs text-zinc-500 ${boxClass}`}
       >
         <ImageOff className="h-6 w-6 text-zinc-600" />
         <span>Image bloquée ou indisponible</span>
