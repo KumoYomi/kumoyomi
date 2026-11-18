@@ -53,6 +53,19 @@ function ensureTrailingSlash(url: string): string {
   return url.endsWith('/') ? url : `${url}/`;
 }
 
+function extractLastSlug(urlOrPath: string): string {
+  if (!urlOrPath) return '';
+  try {
+    const parsed = new URL(urlOrPath, 'https://placeholder.invalid');
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    return parts.at(-1) ?? '';
+  } catch {
+    const clean = urlOrPath.split(/[?#]/)[0] ?? '';
+    const parts = clean.split('/').filter(Boolean);
+    return parts.at(-1) ?? '';
+  }
+}
+
 export function interpolateTemplate(template: string, variables: TemplateVariables): string {
   const cleanBase = variables.baseUrl.replace(/\/+$/, '');
   const page = variables.page ?? 1;
@@ -68,8 +81,10 @@ export function interpolateTemplate(template: string, variables: TemplateVariabl
     encodedQuery: encodeURIComponent(query),
     mangaUrl,
     mangaUrlSlash: mangaUrl ? ensureTrailingSlash(mangaUrl) : '',
+    mangaSlug: extractLastSlug(mangaUrl),
     chapterUrl,
     chapterUrlSlash: chapterUrl ? ensureTrailingSlash(chapterUrl) : '',
+    chapterSlug: extractLastSlug(chapterUrl),
   };
 
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, rawKey: string) => {
@@ -125,6 +140,56 @@ export interface FetchedResponse {
   status: number;
 }
 
+async function executeTimedFetch(
+  url: string,
+  init: RequestInit,
+  source: SourceConfig,
+  timeoutMs: number,
+): Promise<{ response: Response; text: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      credentials: 'include',
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new SourceHttpError({
+        sourceId: source.id,
+        url,
+        status: 408,
+        statusText: 'Timeout',
+        message: `Délai dépassé (${timeoutMs / 1000}s) lors de la connexion à ${source.name}.`,
+      });
+    }
+    throw new SourceHttpError({
+      sourceId: source.id,
+      url,
+      status: 0,
+      statusText: 'Network Error',
+      message: `Impossible de joindre ${source.name} (${err instanceof Error ? err.message : 'Erreur réseau'}).`,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const text = await response.text();
+  if (isCloudflareResponse(response.status, response.headers, text)) {
+    throw new CloudflareChallengeError({
+      sourceId: source.id,
+      sourceName: source.name,
+      url: source.baseUrl,
+      status: response.status,
+    });
+  }
+
+  return { response, text };
+}
+
 export async function fetchSourceResponse(
   source: SourceConfig,
   reqConfig: RequestConfig,
@@ -176,47 +241,28 @@ export async function fetchSourceResponse(
     }
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const init: RequestInit = { method, headers, body };
+  let { response, text } = await executeTimedFetch(urlObj.toString(), init, source, timeoutMs);
 
-  let response: Response;
-  try {
-    response = await fetch(urlObj.toString(), {
-      method,
-      headers,
-      body,
-      credentials: 'include',
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new SourceHttpError({
-        sourceId: source.id,
-        url: urlObj.toString(),
-        status: 408,
-        statusText: 'Timeout',
-        message: `Délai dépassé (${timeoutMs / 1000}s) lors de la connexion à ${source.name}.`,
-      });
+  // Certains sites retournent HTTP 403 tant qu'un cookie de session initial n'a pas été déposé via warmupUrl.
+  if (response.status === 403 && source.warmupUrl) {
+    const resolvedWarmup = new URL(
+      interpolateTemplate(source.warmupUrl, fullVars),
+      ensureTrailingSlash(source.baseUrl),
+    ).toString();
+    if (resolvedWarmup !== urlObj.toString()) {
+      const warmupHeaders = new Headers();
+      for (const [k, v] of Object.entries(source.headers ?? {})) {
+        warmupHeaders.set(k, interpolateTemplate(v, fullVars));
+      }
+      await executeTimedFetch(
+        resolvedWarmup,
+        { method: 'GET', headers: warmupHeaders },
+        source,
+        timeoutMs,
+      );
+      ({ response, text } = await executeTimedFetch(urlObj.toString(), init, source, timeoutMs));
     }
-    throw new SourceHttpError({
-      sourceId: source.id,
-      url: urlObj.toString(),
-      status: 0,
-      statusText: 'Network Error',
-      message: `Impossible de joindre ${source.name} (${err instanceof Error ? err.message : 'Erreur réseau'}).`,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const text = await response.text();
-  if (isCloudflareResponse(response.status, response.headers, text)) {
-    throw new CloudflareChallengeError({
-      sourceId: source.id,
-      sourceName: source.name,
-      url: source.baseUrl,
-      status: response.status,
-    });
   }
 
   if (!response.ok) {

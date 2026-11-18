@@ -88,6 +88,13 @@ export function parseFlexibleDate(raw: string | undefined | null, nowTs = Date.n
     }
   }
 
+  if (/^\d{9,13}$/.test(text)) {
+    const num = Number(text);
+    if (Number.isFinite(num)) {
+      return num < 1e12 ? num * 1000 : num;
+    }
+  }
+
   const nativeParsed = Date.parse(text);
   if (!Number.isNaN(nativeParsed)) {
     return nativeParsed;

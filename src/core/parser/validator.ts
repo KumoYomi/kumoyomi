@@ -131,14 +131,18 @@ function mergePagesConfig(
 ): PagesEndpointConfig {
   const request = override?.request ?? base?.request;
   const imageUrl = override?.imageUrl ?? base?.imageUrl;
-  if (!request || !imageUrl) {
-    throw new Error('Configuration "pages.request" ou "pages.imageUrl" manquante.');
+  const numberedPages = override?.numberedPages ?? base?.numberedPages;
+  if (!request || (!imageUrl && !numberedPages)) {
+    throw new Error(
+      'Configuration "pages.request" ou "pages.imageUrl" / "pages.numberedPages" manquante.',
+    );
   }
   return {
     request,
     itemsPath: override?.itemsPath ?? base?.itemsPath,
     itemSelector: override?.itemSelector ?? base?.itemSelector,
     imageUrl,
+    numberedPages,
   };
 }
 
@@ -170,6 +174,7 @@ export function resolveSourceWithTemplates(
       ...(template?.headers ?? {}),
       ...(validatedRaw.headers ?? {}),
     },
+    warmupUrl: validatedRaw.warmupUrl ?? template?.warmupUrl,
     popular: validatedRaw.popular ?? template?.popular,
     latest: validatedRaw.latest ?? template?.latest,
     search: validatedRaw.search ?? template?.search,

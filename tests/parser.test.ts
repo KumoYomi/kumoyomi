@@ -259,7 +259,7 @@ describe('KumoYomi Universal Parser & Templates', () => {
     await expect(engine.getPopular(resolved, 1)).rejects.toBeInstanceOf(CloudflareChallengeError);
   });
 
-  it('normalise les clés manga, numéros de chapitre et dates FR/EN', () => {
+  it('normalise les clés manga, numéros de chapitre et dates FR/EN + Unix epoch', () => {
     expect(normalizeMangaKey('Les Chroniques de Kumo !')).toBe(
       normalizeMangaKey('les-chroniques-de-kumo'),
     );
@@ -269,6 +269,244 @@ describe('KumoYomi Universal Parser & Templates', () => {
     expect(parseFlexibleDate('il y a 2 heures', 1_700_000_000_000)).toBe(
       1_700_000_000_000 - 7_200_000,
     );
+    expect(parseFlexibleDate('1700000000')).toBe(1_700_000_000_000);
+    expect(parseFlexibleDate('1700000000000')).toBe(1_700_000_000_000);
+  });
+
+  it('supporte API JSON générique, warmupUrl non-Cloudflare et pages numérotées désobfusquées', async () => {
+    const jsonApiSource = resolveSourceWithTemplates(
+      validateRawSourceConfig({
+        id: 'api-demo-fr',
+        name: 'API Demo',
+        lang: 'fr',
+        baseUrl: 'https://api-demo.example',
+        warmupUrl: '{{baseUrl}}',
+        popular: {
+          request: { method: 'GET', url: '{{baseUrl}}/api/v1/trend', responseType: 'json' },
+          itemsPath: 'data',
+          fields: {
+            title: { jsonPath: 'title', decodeHtmlEntities: true },
+            url: { jsonPath: ['mangaSlug', 'slug'], prefix: '{{baseUrl}}/manga/' },
+            cover: { jsonPath: 'cover', absoluteUrl: true },
+          },
+        },
+        latest: {
+          request: {
+            method: 'GET',
+            url: '{{baseUrl}}/api/v1/latest',
+            queryParams: { page: '{{page}}', limit: '20' },
+            responseType: 'json',
+          },
+          itemsPath: 'data',
+          fields: {
+            title: { jsonPath: 'title', decodeHtmlEntities: true },
+            url: { jsonPath: ['mangaSlug', 'slug'], prefix: '{{baseUrl}}/manga/' },
+            latestChapter: { jsonPath: 'chapitre', prefix: 'Chapitre ' },
+          },
+          hasNextPageCalc: { totalPath: 'total', limitPath: 'limit', pagePath: 'page', pageSize: 20 },
+          pageSize: 20,
+        },
+        mangaDetails: {
+          request: {
+            method: 'GET',
+            url: '{{baseUrl}}/api/v1/manga',
+            queryParams: { manga: '{{mangaSlug}}' },
+            responseType: 'json',
+          },
+          fields: {
+            title: { jsonPath: 'info.title', decodeHtmlEntities: true },
+            cover: { jsonPath: 'info.cover', absoluteUrl: true },
+            author: { jsonPath: 'info.author', decodeHtmlEntities: true },
+            description: { jsonPath: 'info.description', decodeHtmlEntities: true },
+            status: { jsonPath: 'info.status' },
+          },
+        },
+        chapters: {
+          request: {
+            method: 'GET',
+            url: '{{baseUrl}}/api/v1/manga',
+            queryParams: { manga: '{{mangaSlug}}' },
+            responseType: 'json',
+          },
+          itemsPath: 'chapters',
+          fields: {
+            title: {
+              jsonTemplate: 'Chapitre {{num}} - {{title}}',
+              decodeHtmlEntities: true,
+              replace: [
+                { pattern: '\\s*-\\s*$', replacement: '' },
+                { pattern: '^(Chapitre\\s+\\S+)\\s*-\\s*\\1$', replacement: '$1', flags: 'i' },
+              ],
+            },
+            url: {
+              jsonPath: 'slug',
+              replace: [{ pattern: '^/?\\??scan/', replacement: '' }],
+              prefix: '{{baseUrl}}/scan/',
+            },
+            chapterNumber: { jsonPath: 'num' },
+            date: { jsonPath: 'time' },
+          },
+        },
+        pages: {
+          request: {
+            method: 'GET',
+            url: '{{baseUrl}}/api/v1/scan',
+            queryParams: { slug: '{{chapterSlug}}' },
+            responseType: 'json',
+          },
+          numberedPages: {
+            countJsonPath: 'pageNumbers',
+            baseUrlJsonPath: 'pagesBaseUrl',
+            padStart: 2,
+            extension: 'webp',
+            stripSuffixes: ['_b'],
+            stripTokensFromScript: {
+              url: '{{baseUrl}}/js/reader.js',
+              regexes: ["salt\\s*=\\s*['\"]([^'\"]+)['\"]"],
+              minLength: 3,
+              fallbackTokens: ['Z9_x'],
+            },
+          },
+        },
+      }),
+      new Map(),
+    );
+
+    let warmedUp = false;
+    let scriptFetchCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === 'https://api-demo.example/') {
+        warmedUp = true;
+        return new Response('<html>ok</html>', { status: 200 });
+      }
+      if (url.startsWith('https://api-demo.example/api/v1/trend')) {
+        if (!warmedUp) {
+          return new Response('Session cookie required', { status: 403 });
+        }
+        return new Response(
+          JSON.stringify({
+            data: [{ title: 'Blade &amp; Soul', slug: 'blade_soul', cover: '/covers/bs.png' }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url.startsWith('https://api-demo.example/api/v1/latest')) {
+        return new Response(
+          JSON.stringify({
+            total: 25,
+            page: 1,
+            limit: 20,
+            data: [{ title: 'Alpha', mangaSlug: 'alpha', chapitre: '42' }],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://api-demo.example/api/v1/manga?manga=blade_soul') {
+        return new Response(
+          JSON.stringify({
+            info: {
+              title: 'Blade &amp; Soul',
+              author: 'Kuro',
+              status: 'En cours',
+              cover: '/covers/bs.png',
+              description: 'L&#039;histoire d&#039;un héros.',
+            },
+            chapters: [
+              { slug: '/?scan/BS12', num: 12, title: 'Chapitre 12', time: 1_700_000_000 },
+              { slug: 'BS11', num: 11, title: '', time: 1_699_900_000 },
+              { slug: 'BS10', num: 10, title: 'Sp&eacute;cial', time: 1_699_800_000 },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://api-demo.example/api/v1/scan?slug=BS12') {
+        return new Response(
+          JSON.stringify({
+            pageNumbers: 3,
+            pagesBaseUrl: 'https://cdn.api-demo.example/scans/bs12_x7q_b/',
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === 'https://api-demo.example/js/reader.js') {
+        scriptFetchCount += 1;
+        return new Response(`const salt = "\\x5f\\x78\\x37\\x71";`, { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const localEngine = new UniversalParserEngine();
+    const pop = await localEngine.getPopular(jsonApiSource, 1);
+    expect(warmedUp).toBe(true);
+    expect(pop.hasNextPage).toBe(false);
+    expect(pop.items[0]).toEqual({
+      sourceId: 'api-demo-fr',
+      title: 'Blade & Soul',
+      url: 'https://api-demo.example/manga/blade_soul',
+      coverUrl: 'https://api-demo.example/covers/bs.png',
+      latestChapter: undefined,
+    });
+
+    const latest = await localEngine.getLatest(jsonApiSource, 1);
+    expect(latest.hasNextPage).toBe(true);
+    expect(latest.items[0]?.latestChapter).toBe('Chapitre 42');
+    expect(latest.items[0]?.url).toBe('https://api-demo.example/manga/alpha');
+
+    const details = await localEngine.getMangaDetails(
+      jsonApiSource,
+      'https://api-demo.example/manga/blade_soul',
+    );
+    expect(details.description).toBe("L'histoire d'un héros.");
+    expect(details.status).toBe('ongoing');
+
+    const chapters = await localEngine.getChapters(
+      jsonApiSource,
+      'https://api-demo.example/manga/blade_soul',
+    );
+    expect(chapters.map((c) => [c.title, c.url, c.publishedAt])).toEqual([
+      ['Chapitre 12', 'https://api-demo.example/scan/BS12', 1_700_000_000_000],
+      ['Chapitre 11', 'https://api-demo.example/scan/BS11', 1_699_900_000_000],
+      ['Chapitre 10 - Spécial', 'https://api-demo.example/scan/BS10', 1_699_800_000_000],
+    ]);
+
+    const pages1 = await localEngine.getChapterPages(
+      jsonApiSource,
+      'https://api-demo.example/scan/BS12',
+    );
+    const pages2 = await localEngine.getChapterPages(
+      jsonApiSource,
+      'https://api-demo.example/scan/BS12',
+    );
+    expect(scriptFetchCount).toBe(1);
+    expect(pages1).toEqual([
+      { index: 0, imageUrl: 'https://cdn.api-demo.example/scans/bs12/01.webp' },
+      { index: 1, imageUrl: 'https://cdn.api-demo.example/scans/bs12/02.webp' },
+      { index: 2, imageUrl: 'https://cdn.api-demo.example/scans/bs12/03.webp' },
+    ]);
+    expect(pages2).toEqual(pages1);
+
+    // Un 403 Cloudflare doit lever CloudflareChallengeError sans déclencher warmupUrl
+    let cfWarmupCalled = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === 'https://api-demo.example/') {
+          cfWarmupCalled = true;
+          return new Response('ok', { status: 200 });
+        }
+        return new Response('<title>Just a moment...</title>', {
+          status: 403,
+          headers: { 'cf-mitigated': 'challenge' },
+        });
+      }),
+    );
+    await expect(localEngine.getLatest(jsonApiSource, 1)).rejects.toBeInstanceOf(
+      CloudflareChallengeError,
+    );
+    expect(cfWarmupCalled).toBe(false);
   });
 
   it('convertit une extension Keiyoushi Origines via convert.mjs', () => {

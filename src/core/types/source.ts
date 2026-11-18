@@ -21,8 +21,16 @@ export interface FieldExtractor {
   absoluteUrl?: boolean;
   /** Supprime les espaces/retours à la ligne autour de la valeur (true par défaut). */
   trim?: boolean;
-  /** Valeur fixe ou template si utilisé dans un contexte JSON. */
-  jsonPath?: string;
+  /** Chemin pointé (ou liste ordonnée de chemins) utilisé dans un contexte JSON. */
+  jsonPath?: string | string[];
+  /** Gabarit texte pour assembler plusieurs champs JSON (ex: "Chapitre {{num}} - {{title}}"). */
+  jsonTemplate?: string;
+  /** Préfixe ajouté si la valeur extraite est non vide (supporte {{baseUrl}}). */
+  prefix?: string;
+  /** Suffixe ajouté si la valeur extraite est non vide (supporte {{baseUrl}}). */
+  suffix?: string;
+  /** Décode les entités HTML (&amp;, &#039;, etc.). */
+  decodeHtmlEntities?: boolean;
 }
 
 export type ResponseType = 'html' | 'json' | 'json-html';
@@ -51,6 +59,12 @@ export interface CatalogueEndpointConfig {
   };
   hasNextPageSelector?: string;
   hasNextPageJsonPath?: string;
+  hasNextPageCalc?: {
+    totalPath: string;
+    limitPath?: string;
+    pagePath?: string;
+    pageSize?: number;
+  };
   pageSize?: number;
 }
 
@@ -91,11 +105,26 @@ export interface ChaptersEndpointConfig {
   reverseOrder?: boolean;
 }
 
+export interface NumberedPagesConfig {
+  countJsonPath: string;
+  baseUrlJsonPath: string;
+  padStart?: number;
+  extension?: string;
+  stripSuffixes?: string[];
+  stripTokensFromScript?: {
+    url: string;
+    regexes: string[];
+    minLength?: number;
+    fallbackTokens?: string[];
+  };
+}
+
 export interface PagesEndpointConfig {
   request: RequestConfig;
   itemsPath?: string;
   itemSelector?: string;
-  imageUrl: FieldExtractor;
+  imageUrl?: FieldExtractor;
+  numberedPages?: NumberedPagesConfig;
 }
 
 export interface SourceConfig {
@@ -108,6 +137,8 @@ export interface SourceConfig {
   extends?: string;
   vars?: Record<string, string>;
   headers?: Record<string, string>;
+  /** URL optionnelle visitée une fois en cas de HTTP 403 non-Cloudflare (cookie de session). */
+  warmupUrl?: string;
   popular?: CatalogueEndpointConfig;
   latest?: CatalogueEndpointConfig;
   search?: CatalogueEndpointConfig;
@@ -122,6 +153,7 @@ export interface SourceTemplateConfig {
   lang?: string;
   vars?: Record<string, string>;
   headers?: Record<string, string>;
+  warmupUrl?: string;
   popular?: CatalogueEndpointConfig;
   latest?: CatalogueEndpointConfig;
   search?: CatalogueEndpointConfig;
