@@ -9,6 +9,11 @@ import { parseFlexibleDate } from '@/src/core/parser/dateParser';
 import { UniversalParserEngine } from '@/src/core/parser/engine';
 import { registerInProcessTabProxyHandler } from '@/src/core/extension/browserBridge';
 import {
+  clearImageProxyCache,
+  fetchImageAsBlobUrl,
+  revokeScopeBlobUrls,
+} from '@/src/core/image-loader/blobImageLoader';
+import {
   clearTabProxyCache,
   CloudflareChallengeError,
 } from '@/src/core/parser/httpClient';
@@ -41,6 +46,8 @@ describe('KumoYomi Universal Parser & Templates', () => {
     vi.restoreAllMocks();
     registerInProcessTabProxyHandler(null);
     clearTabProxyCache();
+    clearImageProxyCache();
+    revokeScopeBlobUrls('reader-test');
   });
 
   it('résout correctement l’héritage extends="origines"', () => {
@@ -568,6 +575,53 @@ describe('KumoYomi Universal Parser & Templates', () => {
       bodyText: '<title>Just a moment...</title>',
     }));
     await expect(engine.getPopular(resolved, 1)).rejects.toBeInstanceOf(CloudflareChallengeError);
+  });
+
+  it('récupère les images de sous-domaines CDN Cloudflare via l’onglet parent ouvert', async () => {
+    const createObjectUrlSpy = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockImplementation(() => `blob:test-image-${Math.random()}`);
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    const directFetch = vi.fn().mockResolvedValue(
+      new Response('<title>Just a moment...</title>', {
+        status: 403,
+        headers: { 'cf-mitigated': 'challenge' },
+      }),
+    );
+    vi.stubGlobal('fetch', directFetch);
+
+    const sampleBase64 = Buffer.from('fake-webp-bytes').toString('base64');
+    const proxyHandler = vi.fn(async (req) => {
+      expect(req.fallbackTabOrigin).toBe('https://demo-origines.example');
+      expect(req.responseMode).toBe('base64');
+      return {
+        foundTab: true,
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'image/webp' },
+        bodyBase64: sampleBase64,
+      };
+    });
+    registerInProcessTabProxyHandler(proxyHandler);
+
+    const blob1 = await fetchImageAsBlobUrl(
+      'https://cdn.demo-origines.example/scans/01.webp',
+      'https://demo-origines.example',
+      'reader-test',
+    );
+    const blob2 = await fetchImageAsBlobUrl(
+      'https://cdn.demo-origines.example/scans/02.webp',
+      'https://demo-origines.example',
+      'reader-test',
+    );
+
+    expect(blob1.startsWith('blob:')).toBe(true);
+    expect(blob2.startsWith('blob:')).toBe(true);
+    expect(directFetch).toHaveBeenCalledTimes(1);
+    expect(proxyHandler).toHaveBeenCalledTimes(2);
+    expect(createObjectUrlSpy).toHaveBeenCalledTimes(2);
   });
 
   it('convertit une extension Keiyoushi Origines via convert.mjs', () => {

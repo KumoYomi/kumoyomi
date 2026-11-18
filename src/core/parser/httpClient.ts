@@ -167,6 +167,15 @@ function serializeHeadersInit(headers?: HeadersInit): Record<string, string> {
   return result;
 }
 
+function safeOrigin(rawUrl?: string): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 async function tryFetchViaOpenTab(
   url: string,
   init: RequestInit,
@@ -180,6 +189,7 @@ async function tryFetchViaOpenTab(
     body: typeof init.body === 'string' ? init.body : undefined,
     responseMode: 'text',
     timeoutMs,
+    fallbackTabOrigin: safeOrigin(source.baseUrl),
   });
 
   if (!res?.foundTab) {

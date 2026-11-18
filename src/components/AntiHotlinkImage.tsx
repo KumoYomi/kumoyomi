@@ -22,6 +22,7 @@ export function AntiHotlinkImage({
   onImageLoad,
 }: AntiHotlinkImageProps) {
   const [blobSrc, setBlobSrc] = useState<string | null>(null);
+  const [directFallback, setDirectFallback] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(Boolean(src));
   const [error, setError] = useState<boolean>(false);
   const [attempt, setAttempt] = useState<number>(0);
@@ -30,12 +31,14 @@ export function AntiHotlinkImage({
     let active = true;
     if (!src) {
       setBlobSrc(null);
+      setDirectFallback(false);
       setLoading(false);
       setError(false);
       return;
     }
 
     setLoading(true);
+    setDirectFallback(false);
     setError(false);
 
     fetchImageAsBlobUrl(src, referer, scopeId)
@@ -46,9 +49,10 @@ export function AntiHotlinkImage({
       })
       .catch(() => {
         if (!active) return;
+        // Dernier repli : balise <img> native (Sec-Fetch-Dest: image, mode no-cors + règle DNR Referer)
         setBlobSrc(null);
+        setDirectFallback(true);
         setLoading(false);
-        setError(true);
       });
 
     return () => {
@@ -74,7 +78,9 @@ export function AntiHotlinkImage({
     );
   }
 
-  if (error || !blobSrc) {
+  const resolvedSrc = blobSrc ?? (directFallback ? src : null);
+
+  if (error || !resolvedSrc) {
     return (
       <div
         className={`flex flex-col items-center justify-center gap-2 bg-zinc-900/90 p-3 text-center text-xs text-zinc-500 ${className}`}
@@ -100,10 +106,11 @@ export function AntiHotlinkImage({
 
   return (
     <img
-      src={blobSrc}
+      src={resolvedSrc}
       alt={alt}
       loading="lazy"
       onLoad={onImageLoad}
+      onError={() => setError(true)}
       className={className}
     />
   );

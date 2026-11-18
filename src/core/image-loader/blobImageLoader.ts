@@ -8,8 +8,53 @@ import { isCloudflareResponse } from '@/src/core/parser/httpClient';
 const scopeUrls = new Map<string, Map<string, string>>();
 const inflightRequests = new Map<string, Promise<string>>();
 const ensuredRefererPairs = new Set<string>();
+const preferredImageProxyHosts = new Map<string, number>();
 
 const MAX_COVER_CACHE_ENTRIES = 160;
+const IMAGE_PROXY_TTL_MS = 5 * 60 * 1000;
+
+export function clearImageProxyCache(): void {
+  preferredImageProxyHosts.clear();
+}
+
+function safeOrigin(url?: string): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function decodeBase64ToBlob(base64: string, contentType?: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: contentType || 'image/jpeg' });
+}
+
+async function tryFetchImageViaTab(imageUrl: string, refererUrl?: string): Promise<Blob | null> {
+  const proxied = await requestTabProxyFetch({
+    url: imageUrl,
+    method: 'GET',
+    responseMode: 'base64',
+    fallbackTabOrigin: safeOrigin(refererUrl),
+  });
+  if (proxied?.foundTab && proxied.ok && proxied.bodyBase64) {
+    return decodeBase64ToBlob(proxied.bodyBase64, proxied.headers?.['content-type']);
+  }
+  return null;
+}
 
 async function ensureReferer(imageUrl: string, refererUrl?: string): Promise<void> {
   if (!refererUrl) return;
@@ -85,39 +130,49 @@ export async function fetchImageAsBlobUrl(
 
       await ensureReferer(trimmed, refererUrl);
 
-      const response = await fetch(trimmed, {
-        credentials: 'include',
-      });
-
+      const imgHost = safeHost(trimmed);
+      const cachedProxyUntil = imgHost ? preferredImageProxyHosts.get(imgHost) : undefined;
       let blob: Blob | undefined;
-      if (!response.ok) {
-        let cfDetected = response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge';
-        if (!cfDetected && (response.status === 403 || response.status === 503 || response.status === 429)) {
-          const errText = await response.text().catch(() => '');
-          cfDetected = isCloudflareResponse(response.status, response.headers, errText);
+
+      if (cachedProxyUntil && cachedProxyUntil > Date.now()) {
+        const proxiedBlob = await tryFetchImageViaTab(trimmed, refererUrl);
+        if (proxiedBlob) {
+          preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
+          blob = proxiedBlob;
+        } else {
+          preferredImageProxyHosts.delete(imgHost);
         }
-        if (cfDetected) {
-          const proxied = await requestTabProxyFetch({
-            url: trimmed,
-            method: 'GET',
-            responseMode: 'base64',
-          });
-          if (proxied?.foundTab && proxied.ok && proxied.bodyBase64) {
-            const binary = atob(proxied.bodyBase64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) {
-              bytes[i] = binary.charCodeAt(i);
-            }
-            blob = new Blob([bytes], {
-              type: proxied.headers?.['content-type'] || 'image/jpeg',
-            });
+      }
+
+      if (!blob) {
+        const response = await fetch(trimmed, {
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          let cfDetected = response.headers.get('cf-mitigated')?.toLowerCase() === 'challenge';
+          if (
+            !cfDetected &&
+            (response.status === 403 || response.status === 503 || response.status === 429)
+          ) {
+            const errText = await response.text().catch(() => '');
+            cfDetected = isCloudflareResponse(response.status, response.headers, errText);
           }
+          if (cfDetected) {
+            const proxiedBlob = await tryFetchImageViaTab(trimmed, refererUrl);
+            if (proxiedBlob) {
+              if (imgHost) {
+                preferredImageProxyHosts.set(imgHost, Date.now() + IMAGE_PROXY_TTL_MS);
+              }
+              blob = proxiedBlob;
+            }
+          }
+          if (!blob) {
+            throw new Error(`HTTP ${response.status} sur l'image`);
+          }
+        } else {
+          blob = await response.blob();
         }
-        if (!blob) {
-          throw new Error(`HTTP ${response.status} sur l'image`);
-        }
-      } else {
-        blob = await response.blob();
       }
 
       if (!blob || blob.size === 0) {

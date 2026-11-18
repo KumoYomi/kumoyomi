@@ -5,6 +5,8 @@ export interface TabProxyFetchRequest {
   body?: string;
   responseMode?: 'text' | 'base64';
   timeoutMs?: number;
+  /** Origine du site principal déjà ouvert (utile pour les sous-domaines CDN). */
+  fallbackTabOrigin?: string;
 }
 
 export interface TabProxyFetchResult {

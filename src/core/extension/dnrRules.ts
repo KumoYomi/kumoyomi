@@ -2,7 +2,9 @@ import { browser } from 'wxt/browser';
 
 const SOURCE_RULE_ID_START = 10_000;
 const IMAGE_RULE_ID_START = 20_000;
+const CORS_RULE_ID_START = 30_000;
 const SESSION_IMAGE_MAP_KEY = 'kumoyomi_dnr_image_hosts';
+const SESSION_CORS_MAP_KEY = 'kumoyomi_dnr_cors_pairs';
 
 type DnrRule = Parameters<
   typeof browser.declarativeNetRequest.updateSessionRules
@@ -150,10 +152,13 @@ export async function ensureImageRefererDnrRule(
     priority: 2,
     action: {
       type: 'modifyHeaders',
-      requestHeaders: [{ header: 'Referer', operation: 'set', value: `${cleanRefererOrigin}/` }],
+      requestHeaders: [
+        { header: 'Referer', operation: 'set', value: `${cleanRefererOrigin}/` },
+        { header: 'Origin', operation: 'remove' },
+      ],
     },
     condition: {
-      urlFilter: `||${imageHost}/`,
+      urlFilter: `||${imageHost.toLowerCase()}/`,
       ...(initiator ? { initiatorDomains: [initiator] } : {}),
       resourceTypes: ['xmlhttprequest', 'image', 'other'],
     },
@@ -162,4 +167,67 @@ export async function ensureImageRefererDnrRule(
   await applySessionRules([ruleId], [rule]);
   hostMap[imageHost] = { id: ruleId, referer: cleanRefererOrigin };
   await storageArea.set({ [SESSION_IMAGE_MAP_KEY]: hostMap });
+}
+
+/**
+ * Injecte Access-Control-Allow-Origin pour les requêtes fetch same-site (ex: CDN image en sous-domaine)
+ * déclenchées depuis un onglet déjà ouvert et débloqué du domaine principal.
+ */
+export async function ensureCrossSubdomainCorsDnrRule(
+  targetHost: string,
+  tabOrigin: string,
+): Promise<void> {
+  if (!browser.declarativeNetRequest) return;
+
+  let cleanTabOrigin: string;
+  let tabHost: string;
+  try {
+    const u = new URL(tabOrigin);
+    cleanTabOrigin = u.origin;
+    tabHost = u.hostname.toLowerCase();
+  } catch {
+    return;
+  }
+
+  const cleanTargetHost = targetHost.toLowerCase();
+  if (!cleanTargetHost || !tabHost || cleanTargetHost === tabHost) {
+    return;
+  }
+
+  const pairKey = `${cleanTargetHost}::${cleanTabOrigin}`;
+  const storageArea = browser.storage.session ?? browser.storage.local;
+  const stored = await storageArea.get(SESSION_CORS_MAP_KEY);
+  const pairMap = (stored[SESSION_CORS_MAP_KEY] as Record<string, number> | undefined) ?? {};
+
+  if (pairMap[pairKey] !== undefined) {
+    return;
+  }
+
+  const usedIds = new Set(Object.values(pairMap));
+  let ruleId = CORS_RULE_ID_START;
+  while (usedIds.has(ruleId)) {
+    ruleId += 1;
+  }
+
+  const rule: DnrRule = {
+    id: ruleId,
+    priority: 3,
+    action: {
+      type: 'modifyHeaders',
+      responseHeaders: [
+        { header: 'Access-Control-Allow-Origin', operation: 'set', value: cleanTabOrigin },
+        { header: 'Access-Control-Allow-Credentials', operation: 'set', value: 'true' },
+        { header: 'Cross-Origin-Resource-Policy', operation: 'remove' },
+      ],
+    },
+    condition: {
+      urlFilter: `||${cleanTargetHost}/`,
+      initiatorDomains: [tabHost],
+      resourceTypes: ['xmlhttprequest'],
+    },
+  };
+
+  await applySessionRules([ruleId], [rule]);
+  pairMap[pairKey] = ruleId;
+  await storageArea.set({ [SESSION_CORS_MAP_KEY]: pairMap });
 }

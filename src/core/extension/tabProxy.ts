@@ -3,6 +3,7 @@ import type {
   TabProxyFetchRequest,
   TabProxyFetchResult,
 } from '@/src/core/extension/browserBridge';
+import { ensureCrossSubdomainCorsDnrRule } from '@/src/core/extension/dnrRules';
 
 const CHALLENGE_TITLE_MARKERS = [
   'just a moment',
@@ -18,28 +19,73 @@ function looksLikeChallengeTitle(title?: string): boolean {
   return CHALLENGE_TITLE_MARKERS.some((m) => lower.includes(m));
 }
 
-function getCandidateTabs(tabs: Array<{ id?: number; url?: string; title?: string; active?: boolean; discarded?: boolean }>, targetOrigin: string) {
-  const matching = tabs.filter((tab) => {
-    if (tab.id === undefined || !tab.url) return false;
-    try {
-      return new URL(tab.url).origin === targetOrigin;
-    } catch {
-      return false;
-    }
-  });
+function getSiteRoot(hostname: string): string {
+  const parts = hostname.toLowerCase().split('.').filter(Boolean);
+  return parts.length >= 2 ? parts.slice(-2).join('.') : hostname.toLowerCase();
+}
 
-  // Priorité : onglet déjà débloqué (hors page de défi), actif/chargé, le plus récent
-  return matching.sort((a, b) => {
-    const scoreA =
-      (looksLikeChallengeTitle(a.title) ? 0 : 10) +
-      (a.discarded ? 0 : 4) +
-      (a.active ? 2 : 0);
-    const scoreB =
-      (looksLikeChallengeTitle(b.title) ? 0 : 10) +
-      (b.discarded ? 0 : 4) +
-      (b.active ? 2 : 0);
-    if (scoreA !== scoreB) return scoreB - scoreA;
-    return (b.id ?? 0) - (a.id ?? 0);
+function matchTabToTarget(
+  tabUrl: string,
+  targetOrigin: string,
+  targetHost: string,
+  fallbackTabOrigin?: string,
+): { exactOrigin: boolean; tabOrigin: string } | null {
+  try {
+    const parsed = new URL(tabUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.origin === targetOrigin) {
+      return { exactOrigin: true, tabOrigin: parsed.origin };
+    }
+
+    const tabHost = parsed.hostname.toLowerCase();
+    const isParentSubdomain =
+      targetHost === tabHost ||
+      targetHost.endsWith(`.${tabHost}`) ||
+      (fallbackTabOrigin === parsed.origin && getSiteRoot(tabHost) === getSiteRoot(targetHost));
+
+    if (isParentSubdomain) {
+      return { exactOrigin: false, tabOrigin: parsed.origin };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+interface CandidateTab {
+  id: number;
+  tabOrigin: string;
+  exactOrigin: boolean;
+  score: number;
+}
+
+function getCandidateTabs(
+  tabs: Array<{ id?: number; url?: string; title?: string; active?: boolean; discarded?: boolean }>,
+  targetOrigin: string,
+  targetHost: string,
+  fallbackTabOrigin?: string,
+): CandidateTab[] {
+  const candidates: CandidateTab[] = [];
+  for (const tab of tabs) {
+    if (tab.id === undefined || !tab.url) continue;
+    const match = matchTabToTarget(tab.url, targetOrigin, targetHost, fallbackTabOrigin);
+    if (!match) continue;
+    const score =
+      (match.exactOrigin ? 20 : 10) +
+      (looksLikeChallengeTitle(tab.title) ? 0 : 10) +
+      (tab.discarded ? 0 : 4) +
+      (tab.active ? 2 : 0);
+    candidates.push({
+      id: tab.id,
+      tabOrigin: match.tabOrigin,
+      exactOrigin: match.exactOrigin,
+      score,
+    });
+  }
+
+  return candidates.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score;
+    return b.id - a.id;
   });
 }
 
@@ -50,6 +96,7 @@ async function inPageFetchExecutor(params: {
   body?: string;
   responseMode: 'text' | 'base64';
   timeoutMs: number;
+  isCrossOrigin: boolean;
 }): Promise<TabProxyFetchResult> {
   const forbidden = new Set([
     'origin',
@@ -79,6 +126,7 @@ async function inPageFetchExecutor(params: {
       headers: cleanHeaders,
       body: params.body,
       credentials: 'include',
+      cache: params.isCrossOrigin ? 'no-store' : 'default',
       signal: controller.signal,
     });
 
@@ -128,7 +176,7 @@ async function inPageFetchExecutor(params: {
 }
 
 /**
- * Exécute une requête fetch same-origin dans un onglet déjà ouvert et débloqué du site cible
+ * Exécute une requête fetch dans un onglet déjà ouvert et débloqué du site (ou domaine parent)
  * afin de bénéficier des cookies partitionnés/Cloudflare et des en-têtes navigateur natifs.
  */
 export async function proxyFetchInOpenTab(
@@ -139,16 +187,19 @@ export async function proxyFetchInOpenTab(
   }
 
   let targetOrigin: string;
+  let targetHost: string;
   try {
-    targetOrigin = new URL(request.url).origin;
+    const parsed = new URL(request.url);
+    targetOrigin = parsed.origin;
+    targetHost = parsed.hostname.toLowerCase();
   } catch {
     return { foundTab: false };
   }
 
-  let candidates: ReturnType<typeof getCandidateTabs> = [];
+  let candidates: CandidateTab[] = [];
   try {
     const tabs = await browser.tabs.query({});
-    candidates = getCandidateTabs(tabs, targetOrigin);
+    candidates = getCandidateTabs(tabs, targetOrigin, targetHost, request.fallbackTabOrigin);
   } catch {
     return { foundTab: false };
   }
@@ -156,17 +207,22 @@ export async function proxyFetchInOpenTab(
     return { foundTab: false };
   }
 
-  const payload = {
-    url: request.url,
-    method: request.method ?? 'GET',
-    headers: request.headers ?? {},
-    body: request.body,
-    responseMode: request.responseMode ?? 'text',
-    timeoutMs: request.timeoutMs ?? 15_000,
-  };
-
   for (const tab of candidates) {
-    if (tab.id === undefined) continue;
+    const isCrossOrigin = !tab.exactOrigin;
+    if (isCrossOrigin) {
+      await ensureCrossSubdomainCorsDnrRule(targetHost, tab.tabOrigin);
+    }
+
+    const payload = {
+      url: request.url,
+      method: request.method ?? 'GET',
+      headers: request.headers ?? {},
+      body: request.body,
+      responseMode: request.responseMode ?? 'text',
+      timeoutMs: request.timeoutMs ?? 15_000,
+      isCrossOrigin,
+    };
+
     try {
       const results = await browser.scripting.executeScript({
         target: { tabId: tab.id },
