@@ -36,7 +36,7 @@ function resolveMonthIndex(rawMonth: string): number | null {
 
 export function parseFlexibleDate(raw: string | undefined | null, nowTs = Date.now()): number | undefined {
   if (!raw) return undefined;
-  const text = raw.trim();
+  const text = raw.trim().replace(/^\$D(?=\d{4}-)/, '');
   if (!text) return undefined;
 
   const lower = text.toLowerCase();

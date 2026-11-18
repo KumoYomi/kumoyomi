@@ -1847,4 +1847,124 @@ describe('Keiyoushi / Mihon FR Importer & Compiler', () => {
     expect(meta?.nsfw).toBe(true);
     expect(meta?.baseUrl).toBe('https://multi-demo.example');
   });
+
+  it('supports poseidonscans RSC endpoints and scanmanga LEL compressed page decoder', async () => {
+    const { deflateSync } = await import('node:zlib');
+    const tplMap = new Map(Object.entries(BUILT_IN_KEIYOUSHI_TEMPLATES));
+
+    const poseidon = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.poseidonscans!(
+        { slug: 'poseidonscans', id: 'poseidon-fr', name: 'Poseidon Scans', lang: 'fr', baseUrl: 'https://pos-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+    const scanmanga = resolveSourceWithTemplates(
+      FRENCH_CUSTOM_RECIPES.scanmanga!(
+        { slug: 'scanmanga', id: 'scanmanga-fr', name: 'Scan-Manga', lang: 'fr', baseUrl: 'https://m.sm-demo.example' },
+        '',
+      ),
+      tplMap,
+    );
+
+    const chapterId = 583837;
+    const rawPayloadJson = JSON.stringify({
+      dN: 'data.sm-demo.example',
+      s: 'demo-series',
+      v: '32209',
+      c: String(chapterId),
+      p: {
+        '2': { f: '2_two', e: 'jpg' },
+        '1': { f: '1_one', e: 'jpg' },
+      },
+    });
+    const b64Payload = Buffer.from(rawPayloadJson, 'utf8').toString('base64');
+    const reversedWithSuffix = b64Payload.split('').reverse().join('') + chapterId.toString(16);
+    const compressedResp = deflateSync(Buffer.from(reversedWithSuffix, 'utf8')).toString('base64');
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === 'https://pos-demo.example/' || url === 'https://pos-demo.example') {
+        return new Response(
+          `18:${JSON.stringify([{ id: '1', position: 1, manga: { title: 'Pos Title', slug: 'pos-title' } }])}\n`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://pos-demo.example/serie/pos-title') {
+        return new Response(
+          `18:${JSON.stringify({
+            manga: {
+              title: 'Pos Title',
+              slug: 'pos-title',
+              description: 'Desc test',
+              status: 'En cours',
+              categories: [{ name: 'Action' }, { name: 'Magie' }],
+              chapters: [{ number: 9, title: null, createdAt: '$D2026-10-24T19:59:53.926Z' }],
+            },
+          })}\n`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://pos-demo.example/serie/pos-title/chapter/9') {
+        return new Response(
+          `17:${JSON.stringify({
+            currentChapter: { isPremium: false },
+            initialData: { images: [{ originalUrl: '/api/chapters/pos-title/ch9/p1.webp', order: 0 }] },
+          })}\n`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://m.sm-demo.example/TOP-Manga-Webtoon-47.html') {
+        return new Response(
+          `<html><div id="liste_series"><div class="image_listing"><a href="https://www.sm-demo.example/10834/Demo-Title.html"><img data-original="https://static.sm-demo.example/img/manga/demo.jpg" alt="Demo Title" /></a></div></div></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://www.sm-demo.example/10834/Demo-Title.html') {
+        return new Response(
+          `<html>
+            <meta itemprop="name" content="Demo Title" />
+            <meta itemprop="image" content="https://static.sm-demo.example/img/manga/demo.jpg" />
+            <div class="chapitre_nom"><a href="https://www.sm-demo.example/lecture-en-ligne/Demo-Chapitre-1_583837.html">Chapitre 1</a></div>
+          </html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://www.sm-demo.example/lecture-en-ligne/Demo-Chapitre-1_583837.html') {
+        return new Response(
+          `<html><script>var sml='bVal';var sme='aVal';var smi='dVal';</script></html>`,
+          { status: 200 },
+        );
+      }
+      if (url === 'https://bqj.sm-demo.example/lel/583837.json') {
+        return new Response(compressedResp, { status: 200 });
+      }
+      return new Response('', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    // Verify PoseidonScans flow
+    const posPop = await parserEngine.getPopular(poseidon, 1);
+    expect(posPop.items[0]?.title).toBe('Pos Title');
+    expect(posPop.items[0]?.coverUrl).toBe('https://pos-demo.example/api/covers/pos-title.webp');
+    const posDet = await parserEngine.getMangaDetails(poseidon, 'https://pos-demo.example/serie/pos-title');
+    expect(posDet.genres).toEqual(['Action', 'Magie']);
+    const posChs = await parserEngine.getChapters(poseidon, 'https://pos-demo.example/serie/pos-title');
+    expect(posChs[0]?.title).toBe('Chapitre 9');
+    expect(posChs[0]?.publishedAt).toBeGreaterThan(0);
+    const posPages = await parserEngine.getChapterPages(poseidon, posChs[0]!.url);
+    expect(posPages.map((p) => p.imageUrl)).toEqual(['https://pos-demo.example/api/chapters/pos-title/ch9/p1.webp']);
+
+    // Verify Scan-Manga flow
+    const smPop = await parserEngine.getPopular(scanmanga, 1);
+    expect(smPop.items[0]?.title).toBe('Demo Title');
+    const smChs = await parserEngine.getChapters(scanmanga, smPop.items[0]!.url);
+    expect(smChs[0]?.url).toBe('https://www.sm-demo.example/lecture-en-ligne/Demo-Chapitre-1_583837.html');
+    const smPages = await parserEngine.getChapterPages(scanmanga, smChs[0]!.url);
+    expect(smPages.map((p) => p.imageUrl)).toEqual([
+      'https://data.sm-demo.example/demo-series/32209/583837/1_one.jpg',
+      'https://data.sm-demo.example/demo-series/32209/583837/2_two.jpg',
+    ]);
+    expect(smPages[0]?.headers?.Referer).toBe('https://www.sm-demo.example/lecture-en-ligne/Demo-Chapitre-1_583837.html');
+  });
 });

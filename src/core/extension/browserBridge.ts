@@ -24,6 +24,7 @@ export interface TabProxyFetchResult {
 export type BackgroundMessage =
   | { type: 'SYNC_SOURCE_RULES'; sources: Array<{ baseUrl: string }> }
   | { type: 'ENSURE_IMAGE_REFERER'; imageUrl: string; refererOrigin: string }
+  | { type: 'ENSURE_API_REFERER_ORIGIN'; apiUrl: string; originUrl: string }
   | { type: 'PROXY_FETCH_IN_TAB'; payload: TabProxyFetchRequest }
   | { type: 'CHECK_UPDATES_NOW' }
   | { type: 'SET_BADGE_COUNT'; count: number }

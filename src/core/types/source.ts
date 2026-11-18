@@ -161,6 +161,8 @@ export interface PagesEndpointConfig {
     imageSelector: string;
     imageAttr?: string | string[];
   };
+  /** Décodeur spécialisé pour lecteurs avec charge utile chiffrée/compressée (ex: scanmanga-lel). */
+  customPageDecoder?: 'scanmanga-lel';
 }
 
 export interface SourceConfig {
@@ -260,4 +262,5 @@ export interface ParsedChapterItem {
 export interface ParsedPageItem {
   index: number;
   imageUrl: string;
+  headers?: Record<string, string>;
 }

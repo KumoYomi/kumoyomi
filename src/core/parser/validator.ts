@@ -164,7 +164,11 @@ function mergePagesConfig(
   const numberedPages = override?.numberedPages ?? base?.numberedPages;
   const findEntry = override?.findEntry ?? base?.findEntry;
   const followPageLinks = override?.followPageLinks ?? base?.followPageLinks;
-  if (!request || (!imageUrl && !numberedPages && !findEntry && !followPageLinks)) {
+  const customPageDecoder = override?.customPageDecoder ?? base?.customPageDecoder;
+  if (
+    !request ||
+    (!imageUrl && !numberedPages && !findEntry && !followPageLinks && !customPageDecoder)
+  ) {
     throw new Error(
       'Missing "pages.request" or "pages.imageUrl" / "pages.numberedPages" configuration.',
     );
@@ -179,6 +183,7 @@ function mergePagesConfig(
     scriptArrayRegex: override?.scriptArrayRegex ?? base?.scriptArrayRegex,
     findEntry,
     followPageLinks,
+    customPageDecoder,
   };
 }
 

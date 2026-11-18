@@ -3,11 +3,14 @@ import { browser } from 'wxt/browser';
 const SOURCE_RULE_ID_START = 10_000;
 const IMAGE_RULE_ID_START = 20_000;
 const CORS_RULE_ID_START = 30_000;
+const API_REFERER_RULE_ID_START = 35_000;
 const SESSION_IMAGE_MAP_KEY = 'kumoyomi_dnr_image_hosts';
 const SESSION_CORS_MAP_KEY = 'kumoyomi_dnr_cors_pairs';
+const SESSION_API_REF_MAP_KEY = 'kumoyomi_dnr_api_referers';
 
 const ensuredImageHostCache = new Map<string, string>();
 const ensuredCorsPairCache = new Set<string>();
+const ensuredApiRefererCache = new Map<string, string>();
 
 type DnrRule = Parameters<
   typeof browser.declarativeNetRequest.updateSessionRules
@@ -117,15 +120,21 @@ export async function syncSourceDnrRules(sources: Array<{ baseUrl: string }>): P
 
 export async function ensureImageRefererDnrRule(
   imageUrl: string,
-  refererOrigin: string,
+  refererOriginOrUrl: string,
 ): Promise<void> {
   if (!browser.declarativeNetRequest) return;
 
   let imageHost: string;
   let cleanRefererOrigin: string;
+  let refererHeaderValue: string;
   try {
     imageHost = new URL(imageUrl).host;
-    cleanRefererOrigin = new URL(refererOrigin).origin;
+    const parsedRef = new URL(refererOriginOrUrl);
+    cleanRefererOrigin = parsedRef.origin;
+    refererHeaderValue =
+      parsedRef.pathname && parsedRef.pathname !== '/'
+        ? parsedRef.toString()
+        : `${cleanRefererOrigin}/`;
   } catch {
     return;
   }
@@ -135,7 +144,7 @@ export async function ensureImageRefererDnrRule(
   }
 
   const normalizedHost = imageHost.toLowerCase();
-  if (ensuredImageHostCache.get(normalizedHost) === cleanRefererOrigin) {
+  if (ensuredImageHostCache.get(normalizedHost) === refererHeaderValue) {
     return;
   }
 
@@ -146,8 +155,8 @@ export async function ensureImageRefererDnrRule(
     {};
 
   const existingEntry = hostMap[imageHost];
-  if (existingEntry && existingEntry.referer === cleanRefererOrigin) {
-    ensuredImageHostCache.set(normalizedHost, cleanRefererOrigin);
+  if (existingEntry && existingEntry.referer === refererHeaderValue) {
+    ensuredImageHostCache.set(normalizedHost, refererHeaderValue);
     return;
   }
 
@@ -166,7 +175,7 @@ export async function ensureImageRefererDnrRule(
     action: {
       type: 'modifyHeaders',
       requestHeaders: [
-        { header: 'Referer', operation: 'set', value: `${cleanRefererOrigin}/` },
+        { header: 'Referer', operation: 'set', value: refererHeaderValue },
         { header: 'Origin', operation: 'remove' },
       ],
     },
@@ -178,9 +187,71 @@ export async function ensureImageRefererDnrRule(
   };
 
   await applySessionRules([ruleId], [rule]);
-  ensuredImageHostCache.set(normalizedHost, cleanRefererOrigin);
-  hostMap[imageHost] = { id: ruleId, referer: cleanRefererOrigin };
+  ensuredImageHostCache.set(normalizedHost, refererHeaderValue);
+  hostMap[imageHost] = { id: ruleId, referer: refererHeaderValue };
   await storageArea.set({ [SESSION_IMAGE_MAP_KEY]: hostMap });
+}
+
+export async function ensureApiRefererOriginDnrRule(
+  apiUrl: string,
+  originUrl: string,
+): Promise<void> {
+  if (!browser.declarativeNetRequest) return;
+
+  let apiHost: string;
+  let cleanOrigin: string;
+  try {
+    apiHost = new URL(apiUrl).host.toLowerCase();
+    cleanOrigin = new URL(originUrl).origin;
+  } catch {
+    return;
+  }
+
+  if (!apiHost || !cleanOrigin || ensuredApiRefererCache.get(apiHost) === cleanOrigin) {
+    return;
+  }
+
+  const storageArea = browser.storage.session ?? browser.storage.local;
+  const stored = await storageArea.get(SESSION_API_REF_MAP_KEY);
+  const hostMap =
+    (stored[SESSION_API_REF_MAP_KEY] as Record<string, { id: number; origin: string }> | undefined) ??
+    {};
+
+  const existing = hostMap[apiHost];
+  if (existing && existing.origin === cleanOrigin) {
+    ensuredApiRefererCache.set(apiHost, cleanOrigin);
+    return;
+  }
+
+  const usedIds = new Set(Object.values(hostMap).map((e) => e.id));
+  let ruleId = existing?.id ?? API_REFERER_RULE_ID_START;
+  if (!existing) {
+    while (usedIds.has(ruleId)) ruleId += 1;
+  }
+
+  const initiator = getExtensionInitiatorDomain();
+  const rule: DnrRule = {
+    id: ruleId,
+    priority: 2,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [
+        { header: 'Referer', operation: 'set', value: `${cleanOrigin}/` },
+        { header: 'Origin', operation: 'set', value: cleanOrigin },
+      ],
+    },
+    condition: {
+      urlFilter: `||${apiHost}/`,
+      ...(initiator ? { initiatorDomains: [initiator] } : {}),
+      excludedRequestMethods: ['get', 'head'],
+      resourceTypes: ['xmlhttprequest', 'other'],
+    },
+  };
+
+  await applySessionRules([ruleId], [rule]);
+  ensuredApiRefererCache.set(apiHost, cleanOrigin);
+  hostMap[apiHost] = { id: ruleId, origin: cleanOrigin };
+  await storageArea.set({ [SESSION_API_REF_MAP_KEY]: hostMap });
 }
 
 /**

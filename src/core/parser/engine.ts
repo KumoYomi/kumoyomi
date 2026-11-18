@@ -1,3 +1,8 @@
+import {
+  getSiteRootDomain,
+  isExtensionContext,
+  sendBackgroundMessage,
+} from '@/src/core/extension/browserBridge';
 import { extractChapterNumber } from '@/src/core/parser/chapterNumber';
 import { parseFlexibleDate } from '@/src/core/parser/dateParser';
 import {
@@ -6,6 +11,7 @@ import {
   type FetchedResponse,
   fetchSourceResponse,
   interpolateTemplate,
+  isCloudflareResponse,
   isSameSourceRequest,
 } from '@/src/core/parser/httpClient';
 import type {
@@ -545,8 +551,12 @@ export class UniversalParserEngine {
     const responseType = endpoint.request.responseType ?? 'html';
     const items: ParsedCatalogueItem[] = [];
 
-    if (responseType === 'json') {
-      const rawItems = getByDotPath(res.json, endpoint.itemsPath);
+    if (responseType === 'json' || responseType === 'nextjs-flight') {
+      const jsonRoot =
+        responseType === 'nextjs-flight' && Array.isArray(res.json) && endpoint.itemsPath
+          ? res.json[0]
+          : res.json;
+      const rawItems = getByDotPath(jsonRoot, endpoint.itemsPath);
       const list = Array.isArray(rawItems) ? rawItems : [];
       for (const entry of list) {
         const title = extractJsonField(entry, endpoint.fields.title, source.baseUrl, source.vars);
@@ -561,7 +571,7 @@ export class UniversalParserEngine {
       }
       return {
         items,
-        hasNextPage: computeJsonHasNextPage(endpoint, res.json, items.length, page),
+        hasNextPage: computeJsonHasNextPage(endpoint, jsonRoot, items.length, page),
       };
     }
 
@@ -878,6 +888,10 @@ export class UniversalParserEngine {
     const res = await fetchSourceResponse(source, cfg.request, { chapterUrl });
     const responseType = cfg.request.responseType ?? 'html';
 
+    if (cfg.customPageDecoder === 'scanmanga-lel') {
+      return this.decodeScanMangaLel(source, res, chapterUrl);
+    }
+
     if (responseType === 'json' || responseType === 'nextjs-flight') {
       if (cfg.numberedPages) {
         return this.buildNumberedPages(source, res.json, chapterUrl, cfg.numberedPages);
@@ -1179,6 +1193,123 @@ export class UniversalParserEngine {
       });
     }
     return pages;
+  }
+
+  private async decodeScanMangaLel(
+    source: SourceConfig,
+    res: FetchedResponse,
+    chapterUrl: string,
+  ): Promise<ParsedPageItem[]> {
+    const targetChapterUrl = res.finalUrl || chapterUrl;
+    const sml = /var\s+sml\s*=\s*['"]([^'"]+)['"]/.exec(res.text)?.[1];
+    const sme = /var\s+sme\s*=\s*['"]([^'"]+)['"]/.exec(res.text)?.[1];
+    const smi = /var\s+smi\s*=\s*['"]([^'"]+)['"]/.exec(res.text)?.[1];
+    const chapterIdRaw = /_(\d+)\.html/.exec(targetChapterUrl)?.[1];
+    if (!sml || !sme || !smi || !chapterIdRaw) {
+      return [];
+    }
+
+    const chapterId = Number.parseInt(chapterIdRaw, 10);
+    const parsedPageUrl = new URL(targetChapterUrl);
+    const rootDomain = getSiteRootDomain(parsedPageUrl.hostname);
+    const lelUrl = `https://bqj.${rootDomain}/lel/${chapterId}.json`;
+
+    if (isExtensionContext()) {
+      await sendBackgroundMessage({
+        type: 'ENSURE_API_REFERER_ORIGIN',
+        apiUrl: lelUrl,
+        originUrl: parsedPageUrl.origin,
+      });
+    }
+
+    const bodyPayload = JSON.stringify({
+      a: sme,
+      b: sml,
+      c: 'eyJncHUiOiJBTkdMRSAoQU1ELCBBTUQgUmFkZW9uIFJYIDY2MDAgKHJhZGVvbnNpIG5hdmkyMyBMTFZNIDIwLjEuMiksIE9wZW5HTCA0LjYpIiwiY29ubmVjdGlvbiI6IklDIn0=',
+      d: smi,
+    });
+
+    const apiResponse = await fetch(lelUrl, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: {
+        'Content-Type': 'application/json; charset=UTF-8',
+        Token: 'yf',
+        Source: targetChapterUrl,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: bodyPayload,
+    });
+
+    const encodedData = await apiResponse.text();
+    if (!apiResponse.ok) {
+      if (isCloudflareResponse(apiResponse.status, apiResponse.headers, encodedData)) {
+        throw new CloudflareChallengeError({
+          sourceId: source.id,
+          sourceName: source.name,
+          url: source.baseUrl,
+          requestUrl: lelUrl,
+          status: apiResponse.status,
+        });
+      }
+      throw new Error(`HTTP ${apiResponse.status} while fetching Scan-Manga pages.`);
+    }
+
+    const trimmed = encodedData.trim();
+    if (!trimmed || trimmed.includes('error')) {
+      throw new Error(`Scan-Manga API refused page payload: ${trimmed.slice(0, 120)}`);
+    }
+
+    const rawBinary = atob(trimmed);
+    const compressedBytes = new Uint8Array(rawBinary.length);
+    for (let i = 0; i < rawBinary.length; i += 1) {
+      compressedBytes[i] = rawBinary.charCodeAt(i);
+    }
+
+    let inflated: string;
+    if (typeof DecompressionStream === 'function') {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(compressedBytes);
+          controller.close();
+        },
+      }).pipeThrough(
+        new DecompressionStream('deflate') as unknown as ReadableWritablePair<
+          Uint8Array,
+          Uint8Array
+        >,
+      );
+      inflated = await new Response(stream).text();
+    } else {
+      throw new Error('DecompressionStream is unavailable in this runtime.');
+    }
+
+    const hexSuffix = chapterId.toString(16);
+    const stripped = inflated.endsWith(hexSuffix)
+      ? inflated.slice(0, -hexSuffix.length)
+      : inflated;
+    const reversed = stripped.split('').reverse().join('');
+    const payload = JSON.parse(atob(reversed)) as {
+      dN?: string;
+      s?: string;
+      v?: string;
+      c?: string;
+      p?: Record<string, { f?: string; e?: string }>;
+    };
+
+    if (!payload.dN || !payload.s || !payload.v || !payload.c || !payload.p) {
+      return [];
+    }
+
+    const cdnBase = `https://${payload.dN}/${payload.s}/${payload.v}/${payload.c}`;
+    return Object.entries(payload.p)
+      .filter(([key, val]) => Number.isFinite(Number(key)) && Boolean(val?.f) && Boolean(val?.e))
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([, val], index) => ({
+        index,
+        imageUrl: `${cdnBase}/${val.f}.${val.e}`,
+        headers: { Referer: targetChapterUrl },
+      }));
   }
 }
 

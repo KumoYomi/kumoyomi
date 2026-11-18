@@ -152,6 +152,9 @@ async function downloadImageBlobOnce(imageUrl: string, refererUrl?: string): Pro
 
   const response = await fetch(imageUrl, { credentials: 'include' });
   if (response.ok) {
+    if (response.url.includes('/lelsec')) {
+      throw new Error('Image refused by host');
+    }
     return response.blob();
   }
 
@@ -199,14 +202,16 @@ async function ensureReferer(imageUrl: string, refererUrl?: string): Promise<voi
   if (!refererUrl) return;
   try {
     const imgHost = new URL(imageUrl).host;
-    const refOrigin = new URL(refererUrl).origin;
-    const key = `${imgHost}::${refOrigin}`;
+    const parsedRef = new URL(refererUrl);
+    const refererValue =
+      parsedRef.pathname && parsedRef.pathname !== '/' ? parsedRef.toString() : parsedRef.origin;
+    const key = `${imgHost}::${refererValue}`;
     if (ensuredRefererPairs.has(key)) return;
     ensuredRefererPairs.add(key);
     await sendBackgroundMessage({
       type: 'ENSURE_IMAGE_REFERER',
       imageUrl,
-      refererOrigin: refOrigin,
+      refererOrigin: refererValue,
     });
   } catch {
     // Ignore invalid URLs

@@ -390,7 +390,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
     void (async () => {
       for (const p of ahead) {
         if (cancelled) break;
-        await fetchImageAsBlobUrl(p.imageUrl, baseUrl, scopeId, { priority: 'normal' }).catch(
+        await fetchImageAsBlobUrl(p.imageUrl, p.headers?.Referer || baseUrl, scopeId, { priority: 'normal' }).catch(
           () => {},
         );
       }
@@ -1116,7 +1116,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                 key={p.imageUrl}
                 page={p}
                 index={idx}
-                referer={source?.baseUrl}
+                referer={p.headers?.Referer || source?.baseUrl}
                 scopeId={scopeId}
                 offlineChapterId={isOfflineCached ? chapterId : undefined}
                 forceLoad={Math.abs(idx - currentPage) <= 1}
@@ -1163,11 +1163,11 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
             >
               {readerMode === 'single' && (
                 <div style={zoomPercent !== 100 ? { zoom: zoomPercent / 100 } : undefined}>
-                  <AntiHotlinkImage
-                    key={pages[currentPage]?.imageUrl}
-                    src={pages[currentPage]?.imageUrl}
-                    referer={source?.baseUrl}
-                    scopeId={scopeId}
+                    <AntiHotlinkImage
+                      key={pages[currentPage]?.imageUrl}
+                      src={pages[currentPage]?.imageUrl}
+                      referer={pages[currentPage]?.headers?.Referer || source?.baseUrl}
+                      scopeId={scopeId}
                     offlineChapterId={isOfflineCached ? chapterId : undefined}
                     pageIndex={pages[currentPage]?.index}
                     alt={t('reader.pageAlt', { num: currentPage + 1 })}
@@ -1197,7 +1197,7 @@ export function ReaderPage({ mangaId, chapterId }: ReaderPageProps) {
                     <AntiHotlinkImage
                       key={p.imageUrl}
                       src={p.imageUrl}
-                      referer={source?.baseUrl}
+                      referer={p.headers?.Referer || source?.baseUrl}
                       scopeId={scopeId}
                       offlineChapterId={isOfflineCached ? chapterId : undefined}
                       pageIndex={p.index}

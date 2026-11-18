@@ -6,6 +6,7 @@ import {
 } from '@/src/core/extension/browserBridge';
 import { closeManagedProxyTabs } from '@/src/core/extension/cfPopup';
 import {
+  ensureApiRefererOriginDnrRule,
   ensureImageRefererDnrRule,
   syncSourceDnrRules,
 } from '@/src/core/extension/dnrRules';
@@ -137,6 +138,11 @@ export default defineBackground(() => {
         }
         case 'ENSURE_IMAGE_REFERER': {
           await ensureImageRefererDnrRule(message.imageUrl, message.refererOrigin);
+          sendResponse({ ok: true });
+          break;
+        }
+        case 'ENSURE_API_REFERER_ORIGIN': {
+          await ensureApiRefererOriginDnrRule(message.apiUrl, message.originUrl);
           sendResponse({ ok: true });
           break;
         }
